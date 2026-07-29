@@ -32,9 +32,11 @@ renamed freely in the Designer:
   (`--_state---true` / `--_state---false` formulas on descendants).
 - Maintains a single **`div.hover-tab_active`** highlight that glides from
   trigger to trigger whenever the active tab changes (hover, click, or
-  auto-advance). It matches the active trigger's box each move, so it also
-  works if trigger sizes ever differ. If a `.hover-tab_active` element is
-  authored inside the wrap in the Designer it is adopted (style it there);
+  auto-advance). It lives inside the items' container (`hover-tab_slot`) so
+  it shares the triggers' stacking context, and matches the active trigger's
+  box each move, so it also works if trigger sizes ever differ. If a
+  `.hover-tab_active` element is authored anywhere inside the wrap in the
+  Designer it is adopted (style it there);
   otherwise the module creates one, styled by `src/styles/hover-tab.css` with
   the `--_hover-tab---active-bg` custom property (default white 75%). With the
   highlight on, drop any per-item active *background* styling — keep `is-active`

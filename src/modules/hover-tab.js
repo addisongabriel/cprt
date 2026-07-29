@@ -85,26 +85,30 @@ function initInstance(wrap) {
     panes[index].style.pointerEvents = index === current ? 'auto' : 'none'
   })
 
-  // Sliding active-tab highlight: one div that glides between triggers.
-  // Adopt an authored .hover-tab_active inside the wrap if present, so it can
-  // be styled in the Designer; otherwise create it.
+  // Sliding active-tab highlight: one div that glides between triggers. It
+  // lives inside the items' container (hover-tab_slot) so it shares the
+  // triggers' stacking context instead of fighting z-index from the wrap.
+  // Adopt an authored .hover-tab_active if present, so it can be styled in
+  // the Designer; otherwise create it.
   let highlight = null
   if (config.highlight && triggers.every(Boolean)) {
     highlight = wrap.querySelector('.hover-tab_active')
     if (!highlight) {
       highlight = document.createElement('div')
       highlight.className = 'hover-tab_active'
-      wrap.append(highlight)
+      items[0].parentElement.append(highlight)
     }
   }
 
   function moveHighlight(animate) {
     if (!highlight) return
-    const wrapBox = wrap.getBoundingClientRect()
+    // Position against the highlight's actual containing block, so the math
+    // holds whether the slot is positioned or falls through to the wrap.
+    const originBox = (highlight.offsetParent || wrap).getBoundingClientRect()
     const box = triggers[current].getBoundingClientRect()
     gsap.to(highlight, {
-      x: box.left - wrapBox.left,
-      y: box.top - wrapBox.top,
+      x: box.left - originBox.left,
+      y: box.top - originBox.top,
       width: box.width,
       height: box.height,
       duration: animate && !reducedMotion ? config.highlightDuration : 0,
