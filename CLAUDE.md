@@ -10,6 +10,14 @@ or Lumos convention question.
 - `npm run build` — bundle to `dist/main.js` + `dist/main.css`; `dist/` is
   committed because jsDelivr serves it straight from this repo
 
+## Deploy
+
+`main` is the deploy branch: on every push, CI rebuilds `dist/` and purges
+jsDelivr, so a merge to `main` is live on the site in about a minute. The full
+pipeline, Webflow embed snippet, and gotchas (repo must stay public, cache
+verification) live in the `webflow-deploy` skill — use it for anything
+deploy-related.
+
 ## Rules
 
 - New features go in `src/modules/` as a module exporting `init()`, registered

@@ -1,0 +1,56 @@
+# Deploy: build the bundle and refresh the CDN on every push to main.
+#
+# jsDelivr serves dist/ straight from this repo
+# (https://cdn.jsdelivr.net/gh/addisongabriel/cprt@main/dist/...), but caches
+# branch URLs for ~12h. This workflow rebuilds dist/ (so a src-only push can
+# never ship a stale bundle), commits it if it changed, and purges the CDN so
+# pushes are live in about a minute.
+#
+# Requires the repo to be public — jsDelivr does not serve private repos.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Commit dist if it changed
+        run: |
+          if ! git diff --quiet -- dist; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add dist
+            git commit -m "Build dist [skip ci]"
+            git push
+          fi
+
+      - name: Purge jsDelivr cache
+        run: |
+          set -e
+          for file in main.js main.css; do
+            curl -fsS "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@main/dist/${file}"
+            echo
+          done
