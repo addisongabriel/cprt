@@ -34,3 +34,28 @@
   pointer-events: none;
   background-color: var(--_hover-tab---active-bg, rgb(255 255 255 / 0.75));
 }
+
+/*
+  Pane image zooms while the pane's main button is hovered (or keyboard
+  focused). Scoped to panes via the data attribute so the shared u-image
+  utilities stay untouched everywhere else. Tune via the custom properties
+  on hover-tab_wrap in the Designer.
+*/
+[data-hover-tab='pane'] {
+  overflow: clip;
+}
+
+[data-hover-tab='pane'] .u-image-wrapper {
+  transition: transform var(--_hover-tab---zoom-duration, 0.6s) ease;
+}
+
+[data-hover-tab='pane']:has(.button_main_wrap:hover) .u-image-wrapper,
+[data-hover-tab='pane']:has(.button_main_wrap:focus-within) .u-image-wrapper {
+  transform: scale(var(--_hover-tab---zoom-scale, 1.05));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-hover-tab='pane'] .u-image-wrapper {
+    transition: none;
+  }
+}

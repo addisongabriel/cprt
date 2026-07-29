@@ -42,6 +42,10 @@ renamed freely in the Designer:
   text paints above the highlight.
 - Runs only while on screen (IntersectionObserver); transitions are instant
   and autoplay is off under `prefers-reduced-motion`.
+- CSS-only (no JS): hovering or keyboard-focusing the pane's `button_main_wrap`
+  zooms the pane's image (`.u-image-wrapper`, scoped inside the pane) to 1.05.
+  Tune with `--_hover-tab---zoom-scale` / `--_hover-tab---zoom-duration` on
+  `hover-tab_wrap`.
 
 ## Styling expectations (Designer-owned)
 
