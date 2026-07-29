@@ -1,0 +1,21 @@
+/*
+  Nav Hover Image — structural companion to src/modules/nav-hover-image.js.
+
+  The stacking (absolute positioning of the images on top of each other) is
+  Designer-owned. This only hides the stack so it can't flash before the module
+  initializes — GSAP then writes opacity/visibility inline, which wins over
+  these rules. If JS never runs, the nav-image-default image is what's left
+  visible.
+*/
+
+[nav-image-id]:not([nav-image-default]):not([data-nav-image-default]),
+[data-nav-image-id]:not([nav-image-default]):not([data-nav-image-default]) {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* The images sit over each other as a hover preview — never a click target. */
+[nav-image-id],
+[data-nav-image-id] {
+  pointer-events: none;
+}
