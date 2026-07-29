@@ -58,6 +58,21 @@
     affect the cross-fade: !important changes cascade priority, not transitions,
     so your `transition: opacity 200ms` still runs it.
 
+    `visibility: inherit !important` neutralizes any per-item visibility rule on
+    the images — the kind that hides them all and un-hides only the hovered one.
+    Left in place, such a rule silently defeats everything here: opacity:1 on the
+    fallback image means nothing while visibility keeps it hidden, which is
+    exactly the "hover works but the default image never appears" symptom.
+
+    `inherit` rather than `visible` on purpose. The images live inside a dropdown
+    whose closed state is visibility:hidden, and inheriting means they follow that
+    open/closed state as they should, instead of being forced visible and leaking
+    out of a closed dropdown. It still overrides an explicit per-item rule,
+    because !important beats it while the value stays inheritance.
+
+    Because visibility is now constant rather than toggled per state, opacity
+    alone drives the cross-fade — no visibility snap at either end of the fade.
+
     Everything is gated on `html[data-nav-hover-on]`, set only once images have
     actually been found and painted. That keeps this fail-safe — if the hooks are
     never found, none of these rules apply and the markup behaves exactly as it
@@ -80,6 +95,7 @@
       html[data-nav-hover-on] [nav-image-id],
       html[data-nav-hover-on] [data-nav-image-id] {
         opacity: 0 !important;
+        visibility: inherit !important;
         pointer-events: none;
       }
       html[data-nav-hover-on] [nav-image-id].${ACTIVE},
