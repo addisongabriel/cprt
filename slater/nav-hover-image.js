@@ -8,7 +8,14 @@
   Markup contract:
     nav-link-id="about"     a nav link/item — hovering it reveals the image
     nav-image-id="about"    the image (or its wrapper) with the same id
-    nav-image-default       optional flag on one image: what shows at rest
+    nav-image-default       optional flag on one image: overrides which one
+                            shows before the first hover (default: the first
+                            nav-image-id in DOM order)
+
+  Behavior: the first image is showing from the start, so the nav is never empty
+  when it opens. Hovering a link swaps to its image, and that image then stays —
+  moving off the link does not clear it, so closing and reopening the nav shows
+  whatever was hovered last.
 
   The images are absolutely stacked on top of each other in the Designer. This
   script never positions them and never sets a transition — it only toggles the
@@ -126,12 +133,18 @@
     log(`${links.length} link hook(s):`, links.map((l) => l.id || '(empty)'))
     log(`${images.length} image hook(s):`, images.map((i) => i.id || '(empty)'))
 
-    // `null` is the rest state: only images flagged nav-image-default show.
+    // Shown before anything has been hovered, so the nav is never empty: the
+    // image flagged nav-image-default, else the first one in DOM order.
+    const initial = images.find((image) => image.isDefault) || images[0]
+    log(`initial image: ${initial.id || '(no id)'}`)
+
+    // `null` means "nothing hovered yet" and is only ever the state before the
+    // first hover — there is no going back to it, since the last hovered image
+    // is meant to persist.
     const shouldShow = (image, id) =>
-      id === null ? image.isDefault : image.id === id
+      id === null ? image === initial : image.id === id
 
     let activeId = null
-    let restFrame = null
 
     const paint = (id) => {
       images.forEach((image) => {
@@ -148,38 +161,22 @@
     paint(null)
 
     function activate(id) {
-      if (restFrame !== null) {
-        cancelAnimationFrame(restFrame)
-        restFrame = null
-      }
       if (id === activeId) return
       activeId = id
-      log(id === null ? 'back to rest' : `hover → ${id}`)
+      log(`hover → ${id}`)
       paint(id)
     }
 
-    // Returning to rest waits a frame, so sliding between two adjacent links
-    // (leave then enter, dispatched together) switches images without a blink
-    // through the rest state.
-    function scheduleRest() {
-      if (restFrame !== null) return
-      restFrame = requestAnimationFrame(() => {
-        restFrame = null
-        activate(null)
-      })
-    }
-
+    // Only enter/focusin: the image persists after the pointer leaves, so there
+    // is no leave handler and no need to defer anything to avoid a flicker
+    // between adjacent links.
     pairedLinks.forEach(({ el, id }) => {
       el.addEventListener('pointerenter', (e) => {
         if (e.pointerType === 'mouse') activate(id)
       })
-      el.addEventListener('pointerleave', (e) => {
-        if (e.pointerType === 'mouse') scheduleRest()
-      })
-      // focusin/focusout rather than focus/blur: they bubble, so the hook works
-      // whether it sits on the <a> itself or on a wrapper around it.
+      // focusin rather than focus: it bubbles, so the hook works whether it sits
+      // on the <a> itself or on a wrapper around it.
       el.addEventListener('focusin', () => activate(id))
-      el.addEventListener('focusout', () => scheduleRest())
     })
 
     log(`wired up ${pairedLinks.length} link(s):`, pairedLinks.map((l) => l.id))
