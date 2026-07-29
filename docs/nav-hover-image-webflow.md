@@ -60,6 +60,28 @@ per-instance control):
 | `data-nav-hover-duration` | `0.4`        | Seconds per cross-fade        |
 | `data-nav-hover-ease`     | `power2.out` | GSAP ease name                |
 
+## Debugging (temporary)
+
+The module logs to the console under a `[nav-hover]` prefix, so you can tell
+firing from not-firing without guessing. `DEBUG` at the top of
+`src/modules/nav-hover-image.js` turns it all off — strip it once the effect is
+confirmed working, since one bundle loads on every page.
+
+What each outcome means:
+
+| Console output | Meaning |
+| -------------- | ------- |
+| nothing at all | The bundle isn't loading. Check the Webflow embed — see the `webflow-deploy` skill. |
+| `nothing to wire up. Found no elements matching …` | JS is running but the hook attributes aren't in the published markup on this page. |
+| `hooks found, but no link id matches an image id` | Both sets exist but the values don't line up; the log prints both lists to compare. |
+| `main.css doesn't look loaded` | The JS arrived but the stylesheet didn't, so the images were never hidden. |
+| `wired up N link(s)` | Success — it's listening. |
+| `hover → <id>` / `back to rest` | Hover is firing and resolving to that id. |
+
+`links with no matching image` / `images with no matching link` are warnings, not
+failures — they list the leftovers on each side, which is usually enough to spot
+a typo or a stale CMS slug.
+
 ## Scoping
 
 `data-nav-hover="wrap"` is optional:
