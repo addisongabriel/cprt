@@ -17,6 +17,12 @@
   moving off the link does not clear it, so closing and reopening the nav shows
   whatever was hovered last.
 
+  More than one image list on a page (e.g. two mega dropdowns) needs
+  data-nav-hover="wrap" on each container. Without it the whole document is one
+  group: a single image is the fallback for the page, and hovering in one
+  dropdown clears the other's image. With it, each wrap is fully independent —
+  its own fallback, its own last-hovered image.
+
   The images are absolutely stacked on top of each other in the Designer. This
   script never positions them and never sets a transition — it only toggles the
   class `is-nav-image-active`, which flips opacity between 0 and 1. All timing
@@ -25,34 +31,43 @@
 
   Both the bare and `data-` prefixed attribute forms work. Ids are trimmed and
   matched case-insensitively.
-
-  Console logging is on (DEBUG below) so it's obvious whether this is firing.
-  Turn it off once you're happy with it.
 */
 ;(() => {
   'use strict'
-
-  const DEBUG = true
-  const log = (...a) => DEBUG && console.log('[nav-hover]', ...a)
-  const warn = (...a) => DEBUG && console.warn('[nav-hover]', ...a)
 
   const WRAP_SELECTOR = '[data-nav-hover="wrap"]'
   const LINK_SELECTOR = '[nav-link-id], [data-nav-link-id]'
   const IMAGE_SELECTOR = '[nav-image-id], [data-nav-image-id]'
   const ACTIVE = 'is-nav-image-active'
   const STYLE_ID = 'nav-hover-image-styles'
-  // How long to keep watching for the hooks before giving up and reporting.
+  // How long to keep watching for the hooks before giving up.
   const RETRY_WINDOW = 10000
 
   /*
     State only — no transition, no duration, no easing. Your CSS on the images
     owns the cross-fade.
 
-    The one exception is the `html:not([data-nav-hover-ready])` rule: without it,
-    applying opacity:0 on load would animate through *your* transition, flashing
-    the whole stack and fading it out. That suppression is removed one frame
-    later, after the rest state has painted, and from then on your CSS is fully
-    in control.
+    Two deliberate choices here:
+
+    `!important` on opacity, because this script has to be the single authority
+    on which image is showing. A pre-existing hover rule on the images (a Lumos
+    `data-trigger="hover"` opacity formula, say) will otherwise outrank a plain
+    class selector and keep reverting the image the moment the pointer leaves —
+    which looks exactly like this script not persisting the last hovered image.
+    It does not affect the cross-fade: !important changes cascade priority, not
+    transitions, so your `transition: opacity 200ms` still runs. If you do have
+    such a rule on the images, better to delete it so only one system drives
+    opacity.
+
+    Everything is gated on `html[data-nav-hover-on]`, which is only set once an
+    instance has actually wired up. That keeps this fail-safe: if the hooks are
+    never found, none of these rules apply and the markup behaves exactly as it
+    would without the script, rather than being pinned invisible by an
+    !important rule that nothing is left to undo.
+
+    The `:not([data-nav-hover-ready])` rule suppresses transitions until the
+    initial state has painted — otherwise applying opacity:0 would animate
+    through *your* transition and flash the whole stack on load.
 
     Note this sets opacity but not visibility: a visibility flip can't be
     transitioned, so it would snap at one end of the fade and read as a jerk.
@@ -63,15 +78,17 @@
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-      [nav-image-id], [data-nav-image-id] {
-        opacity: 0;
+      html[data-nav-hover-on] [nav-image-id],
+      html[data-nav-hover-on] [data-nav-image-id] {
+        opacity: 0 !important;
         pointer-events: none;
       }
-      [nav-image-id].${ACTIVE}, [data-nav-image-id].${ACTIVE} {
-        opacity: 1;
+      html[data-nav-hover-on] [nav-image-id].${ACTIVE},
+      html[data-nav-hover-on] [data-nav-image-id].${ACTIVE} {
+        opacity: 1 !important;
       }
-      html:not([data-nav-hover-ready]) [nav-image-id],
-      html:not([data-nav-hover-ready]) [data-nav-image-id] {
+      html[data-nav-hover-on]:not([data-nav-hover-ready]) [nav-image-id],
+      html[data-nav-hover-on]:not([data-nav-hover-ready]) [data-nav-image-id] {
         transition: none !important;
       }
     `
@@ -84,12 +101,9 @@
 
   // Returns true once this root is wired (or was already), false if the hooks
   // aren't in the DOM yet and it's worth trying again.
-  function initInstance(root, verbose) {
+  function initInstance(root) {
     const marker = root.nodeType === 1 ? root : document.documentElement
-    if (marker.hasAttribute('data-nav-hover-initialized')) {
-      warn('already initialized — skipping. This script may be loading twice.')
-      return true
-    }
+    if (marker.hasAttribute('data-nav-hover-initialized')) return true
 
     const links = [...root.querySelectorAll(LINK_SELECTOR)].map((el) => ({
       el,
@@ -102,41 +116,14 @@
     }))
 
     const pairedIds = new Set(images.map((i) => i.id).filter(Boolean))
-    const linkIds = new Set(links.map((l) => l.id).filter(Boolean))
     const pairedLinks = links.filter((l) => pairedIds.has(l.id))
-
-    if (pairedLinks.length === 0) {
-      // Quiet while still watching the DOM; report in full only on give-up.
-      if (verbose) {
-        log(`${links.length} link hook(s):`, links.map((l) => l.id || '(empty)'))
-        log(`${images.length} image hook(s):`, images.map((i) => i.id || '(empty)'))
-        if (links.length === 0 || images.length === 0) {
-          warn(
-            'nothing to wire up. Found no elements matching ' +
-              `"${links.length === 0 ? LINK_SELECTOR : IMAGE_SELECTOR}". ` +
-              'Check the attribute is on the markup and spelled exactly.'
-          )
-        } else {
-          warn(
-            'hooks found, but no link id matches an image id — every pair must ' +
-              'share the same value. Links:',
-            links.map((l) => l.id || '(empty)'),
-            'Images:',
-            images.map((i) => i.id || '(empty)')
-          )
-        }
-      }
-      return false
-    }
+    if (pairedLinks.length === 0) return false
 
     marker.setAttribute('data-nav-hover-initialized', '')
-    log(`${links.length} link hook(s):`, links.map((l) => l.id || '(empty)'))
-    log(`${images.length} image hook(s):`, images.map((i) => i.id || '(empty)'))
 
     // Shown before anything has been hovered, so the nav is never empty: the
     // image flagged nav-image-default, else the first one in DOM order.
     const initial = images.find((image) => image.isDefault) || images[0]
-    log(`initial image: ${initial.id || '(no id)'}`)
 
     // `null` means "nothing hovered yet" and is only ever the state before the
     // first hover — there is no going back to it, since the last hovered image
@@ -163,7 +150,6 @@
     function activate(id) {
       if (id === activeId) return
       activeId = id
-      log(`hover → ${id}`)
       paint(id)
     }
 
@@ -179,57 +165,50 @@
       el.addEventListener('focusin', () => activate(id))
     })
 
-    log(`wired up ${pairedLinks.length} link(s):`, pairedLinks.map((l) => l.id))
-    const unpairedLinks = links
-      .filter((l) => !pairedIds.has(l.id))
-      .map((l) => l.id || '(empty)')
-    const unpairedImages = images
-      .filter((i) => !linkIds.has(i.id))
-      .map((i) => i.id || '(empty)')
-    if (unpairedLinks.length) warn('links with no matching image:', unpairedLinks)
-    if (unpairedImages.length) warn('images with no matching link:', unpairedImages)
     return true
   }
 
-  function attempt(verbose) {
+  function attempt() {
     const wraps = document.querySelectorAll(WRAP_SELECTOR)
     const roots = wraps.length > 0 ? [...wraps] : [document]
     // every() so a page with several wraps keeps watching until all are wired.
-    return roots.every((root) => initInstance(root, verbose))
+    return roots.every((root) => initInstance(root))
   }
 
-  function markReady() {
-    // Let the rest state paint before handing transitions back to your CSS,
-    // so the initial hide is instant rather than an animated fade-out.
+  // Turns the injected rules on, now that state classes are actually being
+  // managed, then hands transitions back to your CSS one frame later — after the
+  // initial state has painted, so the first hide is instant rather than a fade.
+  //
+  // Also the log-free way to check whether this script wired up:
+  //   document.documentElement.hasAttribute('data-nav-hover-on')
+  // false means no link/image id pair was found, and any hover effect you're
+  // seeing is coming from your own CSS, not from here.
+  function engage() {
+    document.documentElement.setAttribute('data-nav-hover-on', '')
     requestAnimationFrame(() =>
       document.documentElement.setAttribute('data-nav-hover-ready', '')
     )
   }
 
-  log('script loaded, scanning for hooks')
   injectStyles()
 
   // No DOMContentLoaded: Slater can run this after that event has already fired
   // (in which case a listener would never call back), and equally it can run
   // before Webflow has rendered the nav — CMS collection lists especially. So
   // try immediately, then watch the DOM until the hooks turn up.
-  if (attempt(false)) {
-    markReady()
+  if (attempt()) {
+    engage()
   } else {
-    log('hooks not in the DOM yet — watching for them')
     const observer = new MutationObserver(() => {
-      if (attempt(false)) {
+      if (attempt()) {
         observer.disconnect()
         clearTimeout(timer)
-        markReady()
+        engage()
       }
     })
     observer.observe(document.documentElement, { childList: true, subtree: true })
-    const timer = setTimeout(() => {
-      observer.disconnect()
-      // Final go, with the full diagnostics this time.
-      attempt(true)
-      markReady()
-    }, RETRY_WINDOW)
+    // Give up quietly: leaving the rules off means the markup keeps whatever
+    // behavior it has without this script.
+    const timer = setTimeout(() => observer.disconnect(), RETRY_WINDOW)
   }
 })()
