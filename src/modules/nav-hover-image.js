@@ -38,6 +38,14 @@ const WRAP_SELECTOR = '[data-nav-hover="wrap"]'
 const LINK_SELECTOR = '[nav-link-id], [data-nav-link-id]'
 const IMAGE_SELECTOR = '[nav-image-id], [data-nav-image-id]'
 
+// Temporary diagnostic logging, so it's visible in the browser console whether
+// this module is loading, what hooks it found, and why it bailed. Flip to false
+// (or ask for it to be stripped) once the module is confirmed working on the
+// site — one bundle loads on every page, so this shouldn't live here forever.
+const DEBUG = true
+const log = (...args) => DEBUG && console.log('[nav-hover]', ...args)
+const warn = (...args) => DEBUG && console.warn('[nav-hover]', ...args)
+
 // Reads a hook attribute in either the bare or `data-` prefixed form.
 function readHook(el, name) {
   return el.getAttribute(name) ?? el.getAttribute(`data-${name}`)
@@ -59,7 +67,10 @@ function readConfig(root) {
 function initInstance(root) {
   // The document fallback marks <html>, so a page can't be double-initialized.
   const marker = root.nodeType === 1 ? root : document.documentElement
-  if (marker.hasAttribute('data-nav-hover-initialized')) return
+  if (marker.hasAttribute('data-nav-hover-initialized')) {
+    warn('already initialized — skipping. The bundle may be loading twice.')
+    return
+  }
 
   const links = [...root.querySelectorAll(LINK_SELECTOR)].map((el) => ({
     el,
@@ -70,9 +81,31 @@ function initInstance(root) {
     id: readId(el, 'nav-image-id'),
     isDefault: readHook(el, 'nav-image-default') !== null,
   }))
+  log(`${links.length} link hook(s):`, links.map((link) => link.id || '(empty)'))
+  log(`${images.length} image hook(s):`, images.map((image) => image.id || '(empty)'))
+
   const pairedIds = new Set(images.map((image) => image.id).filter(Boolean))
+  const linkIds = new Set(links.map((link) => link.id).filter(Boolean))
   const pairedLinks = links.filter((link) => pairedIds.has(link.id))
-  if (pairedLinks.length === 0) return
+
+  if (pairedLinks.length === 0) {
+    if (links.length === 0 || images.length === 0) {
+      warn(
+        'nothing to wire up. Found no elements matching ' +
+          `"${links.length === 0 ? LINK_SELECTOR : IMAGE_SELECTOR}" in this scope. ` +
+          'Check the attribute is on the published markup and spelled exactly.'
+      )
+    } else {
+      warn(
+        'hooks found, but no link id matches an image id — every pair must ' +
+          'share the same value. Links:',
+        links.map((link) => link.id || '(empty)'),
+        'Images:',
+        images.map((image) => image.id || '(empty)')
+      )
+    }
+    return
+  }
   marker.setAttribute('data-nav-hover-initialized', '')
 
   const config = readConfig(root)
@@ -84,9 +117,39 @@ function initInstance(root) {
   let activeId = null
   let restFrame = null
 
+  // Sampled before the gsap.set below writes inline styles. If main.css arrived,
+  // the stylesheet has already hidden the non-default images, so a visible one
+  // here means the JS loaded but the CSS didn't.
+  if (DEBUG) {
+    const sample = images.find((image) => !image.isDefault)
+    const visibility = sample && getComputedStyle(sample.el).visibility
+    if (sample && visibility !== 'hidden') {
+      warn(
+        `main.css doesn't look loaded — an image hook computes ` +
+          `visibility:${visibility}, expected hidden. Check the stylesheet ` +
+          '<link> in the Webflow embed.'
+      )
+    } else if (sample) {
+      log('main.css is loaded (image hooks start hidden)')
+    }
+  }
+
   images.forEach((image) =>
     gsap.set(image.el, { autoAlpha: shouldShow(image, null) ? 1 : 0 })
   )
+
+  log(
+    `wired up ${pairedLinks.length} link(s):`,
+    pairedLinks.map((link) => link.id)
+  )
+  const unpairedLinks = links
+    .filter((link) => !pairedIds.has(link.id))
+    .map((link) => link.id || '(empty)')
+  const unpairedImages = images
+    .filter((image) => !linkIds.has(image.id))
+    .map((image) => image.id || '(empty)')
+  if (unpairedLinks.length > 0) warn('links with no matching image:', unpairedLinks)
+  if (unpairedImages.length > 0) warn('images with no matching link:', unpairedImages)
 
   function activate(id) {
     if (restFrame !== null) {
@@ -95,6 +158,7 @@ function initInstance(root) {
     }
     if (id === activeId) return
     activeId = id
+    log(id === null ? 'back to rest' : `hover → ${id}`)
 
     const duration = reducedMotion ? 0 : config.duration
     images.forEach((image) => {
@@ -136,10 +200,13 @@ function initInstance(root) {
 }
 
 export function init() {
+  log('module loaded, scanning for hooks')
   const wraps = document.querySelectorAll(WRAP_SELECTOR)
   if (wraps.length > 0) {
+    log(`${wraps.length} ${WRAP_SELECTOR} instance(s) — scoping to each`)
     wraps.forEach(initInstance)
   } else {
+    log(`no ${WRAP_SELECTOR} on the page — treating the document as one instance`)
     initInstance(document)
   }
 }
