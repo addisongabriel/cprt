@@ -30,8 +30,14 @@ Copy the file contents straight into Slater's JS panel.
 ## Divergence warning
 
 `src/modules/nav-hover-image.js` is the bundled equivalent of
-`nav-hover-image.js`, and the two are **not** kept in sync automatically. The
-bundled one drives the cross-fade with GSAP (so it owns the duration); the
-Slater one leaves timing to CSS. If both ever load on the same page, the second
-to initialize bails with an "already initialized" warning. Pick one delivery
-path per site.
+`nav-hover-image.js`, and the two are **not** kept in sync automatically. They
+now differ in behavior as well as implementation:
+
+| | `slater/` (in use) | `src/modules/` (dormant) |
+| --- | --- | --- |
+| Cross-fade timing | the site's CSS on the images | GSAP, owns the duration |
+| Before first hover | first `nav-image-id` in DOM order is showing | nothing showing |
+| Pointer leaves a link | image stays — last hovered persists | fades back to rest |
+
+If both ever load on the same page, the second to initialize bails with an
+"already initialized" warning. Pick one delivery path per site.

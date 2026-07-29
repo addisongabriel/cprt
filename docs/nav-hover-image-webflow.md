@@ -3,6 +3,13 @@
 Hovering a nav link cross-fades in its paired image. Powered by
 `src/modules/nav-hover-image.js` + `src/styles/nav-hover-image.css`.
 
+> **The CPRT site runs the Slater build, not this module.** The hook attributes
+> and id pairing below are identical, but `slater/nav-hover-image.js` differs on
+> timing (owned by the site's CSS, not GSAP) and on rest behavior: the first
+> image in DOM order shows before any hover, and the last hovered image persists
+> instead of fading back. See `slater/README.md` for the comparison. Everything
+> in this file describes the bundled module unless noted.
+
 ## Hook attributes (set these in the Designer)
 
 The module targets attributes, not class names, so classes can be renamed
