@@ -11,3 +11,5 @@
     --_trigger---on/off and --_state---true/false inside calc(),
     color-mix(), or transforms.
 */
+
+@import './hover-tab.css';
