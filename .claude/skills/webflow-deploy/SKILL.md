@@ -22,8 +22,9 @@ production deploy; it's live on the site about a minute later.
    URLs. So even a src-only edit made in the GitHub UI deploys correctly.
 4. The Webflow site loads the two URLs via the site-wide embed below.
 
-**Deploy = get the change onto `main`.** The normal path: branch → PR → the
-user merges. Nothing else to do; CI handles build + cache purge.
+**Deploy = get the change onto `main`.** The normal path: branch → PR → merge.
+The user has delegated merging: mark the PR ready and merge it yourself, then
+confirm the Deploy action ran green. CI handles build + cache purge.
 
 ## The Webflow embed (site-wide custom code)
 
