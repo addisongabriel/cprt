@@ -18,8 +18,16 @@ Copy the file contents straight into Slater's JS panel.
   duration is a CSS edit and never a code change. The one exception is a
   first-paint transition suppression, so applying the initial hidden state
   doesn't animate.
-- **`DEBUG` flag at the top** of each file, on by default, logging under a
-  bracketed prefix. Turn it off once the behavior is confirmed.
+- **No console logging.** Instead each script marks the document once it has
+  actually wired up, which is the check to run when something looks dead:
+  `document.documentElement.hasAttribute('data-nav-hover-on')`. False means no
+  hooks were matched, so any effect on screen is coming from site CSS, not from
+  the script.
+- **Authoritative but fail-safe.** These scripts own the state they manage, with
+  `!important`, so a pre-existing hover rule can't outrank them and revert
+  things. That authority is gated behind the wired-up marker above, so a script
+  that never finds its hooks changes nothing at all rather than pinning elements
+  invisible with a rule nothing is left to undo.
 
 ## Files
 
