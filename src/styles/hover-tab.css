@@ -21,11 +21,12 @@
 
 /*
   Sliding active-tab highlight — created (or adopted) and positioned by the
-  module. Size and transform are set inline from the active trigger's box.
-  Restyle via the custom property below on hover-tab_wrap, or author your own
-  div.hover-tab_active inside the wrap in the Designer and the module will
-  use that instead. Triggers must be positioned with a z-index so their text
-  paints above the highlight.
+  module, as a child of the items' container (hover-tab_slot) so it shares
+  the triggers' stacking context. Size and transform are set inline from the
+  active trigger's box. Restyle via the custom property below on
+  hover-tab_wrap, or author your own div.hover-tab_active inside the slot in
+  the Designer and the module will use that instead. Triggers must be
+  positioned with a z-index so their text paints above the highlight.
 */
 .hover-tab_active {
   position: absolute;
