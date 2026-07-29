@@ -1,25 +1,27 @@
 import gsap from 'gsap'
 
 /*
-  Featured Tabs — GSAP-powered auto-advancing tab component.
-  Webflow structure and authoring guide: docs/featured-tabs-webflow.md
+  Hover Tab — GSAP auto-advancing tabs for the "Hover Tab Layout" /
+  "Hover Tab Item" Webflow components. Authoring guide: docs/hover-tab-webflow.md
 
-  Markup contract (roles, one attribute):
-    [data-featured-tabs="wrap"]   component root; carries the config attributes
-    [data-featured-tabs="menu"]   empty container — one tab button is generated
-                                  per pane, labelled from the pane's label element
-    [data-featured-tabs="pane"]   one per tab, stacked in the pane area
-    [data-featured-tabs="label"]  visually-hidden text inside each pane that
-                                  names its tab button
+  Markup contract (hook attributes live on the component definitions):
+    [data-hover-tab="wrap"]     Hover Tab Layout root; carries the config below
+    [data-hover-tab="item"]     Hover Tab Item root — gets `is-active` while
+                                current, so Designer styles can use the Lumos
+                                state system for the active tab look
+    [data-hover-tab="trigger"]  the tab button area inside an item
+    [data-hover-tab="pane"]     the content layout inside an item
 
   Config attributes (all optional, on the wrap):
-    data-tabs-interval      seconds between auto-advances            (default 5)
-    data-tabs-duration      seconds per pane transition              (default 0.6)
-    data-tabs-resume-delay  extra seconds the loop stays paused
-                            after the pointer leaves the component   (default 3)
-    data-tabs-shift         rem the panes travel while crossfading   (default 2)
-    data-tabs-ease          GSAP ease name                           (default power2.inOut)
-    data-tabs-autoplay      "false" disables the auto-advance loop
+    data-tabs-interval        seconds between auto-advances           (default 5)
+    data-tabs-duration        seconds per pane transition             (default 0.6)
+    data-tabs-resume-delay    extra seconds the loop stays paused
+                              after the pointer leaves the component  (default 3)
+    data-tabs-shift           rem the panes travel while crossfading  (default 2)
+    data-tabs-ease            GSAP ease name                          (default power2.inOut)
+    data-tabs-autoplay        "false" disables the auto-advance loop
+    data-tabs-hover-activate  "false" switches tabs on click only,
+                              instead of activating on trigger hover
 */
 
 const DEFAULTS = {
@@ -42,16 +44,20 @@ function readConfig(wrap) {
     shift: num('data-tabs-shift', DEFAULTS.shift),
     ease: wrap.getAttribute('data-tabs-ease') || DEFAULTS.ease,
     autoplay: wrap.getAttribute('data-tabs-autoplay') !== 'false',
+    hoverActivate: wrap.getAttribute('data-tabs-hover-activate') !== 'false',
   }
 }
 
 function initInstance(wrap) {
   if (wrap.hasAttribute('data-tabs-initialized')) return
-  wrap.setAttribute('data-tabs-initialized', '')
 
-  const menu = wrap.querySelector('[data-featured-tabs="menu"]')
-  const panes = [...wrap.querySelectorAll('[data-featured-tabs="pane"]')]
-  if (!menu || panes.length === 0) return
+  const items = [...wrap.querySelectorAll('[data-hover-tab="item"]')]
+  const panes = items.map((item) => item.querySelector('[data-hover-tab="pane"]'))
+  const triggers = items.map((item) =>
+    item.querySelector('[data-hover-tab="trigger"]')
+  )
+  if (items.length === 0 || panes.includes(null)) return
+  wrap.setAttribute('data-tabs-initialized', '')
 
   const config = readConfig(wrap)
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -63,38 +69,14 @@ function initInstance(wrap) {
   let inView = false
   let timer = null
 
-  menu.setAttribute('role', 'tablist')
-  const buttons = panes.map((pane, index) => {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = 'featured-tabs_button'
-    button.setAttribute('role', 'tab')
-    const label = pane.querySelector('[data-featured-tabs="label"]')
-    button.textContent = label?.textContent.trim() || `Tab ${index + 1}`
-    button.addEventListener('click', () => {
-      goTo(index)
-      queueNext()
-    })
-    menu.append(button)
-    return button
+  items.forEach((item, index) => {
+    item.classList.toggle('is-active', index === current)
+    gsap.set(panes[index], { autoAlpha: index === current ? 1 : 0 })
+    panes[index].style.pointerEvents = index === current ? 'auto' : 'none'
   })
-
-  panes.forEach((pane, index) => {
-    pane.setAttribute('role', 'tabpanel')
-    gsap.set(pane, { autoAlpha: index === current ? 1 : 0 })
-    pane.style.pointerEvents = index === current ? 'auto' : 'none'
-  })
-  syncButtons()
-
-  function syncButtons() {
-    buttons.forEach((button, index) => {
-      button.classList.toggle('is-active', index === current)
-      button.setAttribute('aria-selected', index === current ? 'true' : 'false')
-    })
-  }
 
   function goTo(next, forcedDirection) {
-    next = (next + panes.length) % panes.length
+    next = (next + items.length) % items.length
     if (next === current) return
 
     // Advancing to a tab further right drifts everything rightward; further
@@ -104,7 +86,9 @@ function initInstance(wrap) {
     const outgoing = panes[current]
     const incoming = panes[next]
     current = next
-    syncButtons()
+    items.forEach((item, index) =>
+      item.classList.toggle('is-active', index === current)
+    )
 
     gsap.killTweensOf([outgoing, incoming])
     const distance = direction * shiftPx()
@@ -129,12 +113,23 @@ function initInstance(wrap) {
   // the pointer leaves the component) before the regular cadence resumes.
   function queueNext(holdFor = 0) {
     stopTimer()
-    if (!config.autoplay || reducedMotion || hovered || !inView || panes.length < 2) return
+    if (!config.autoplay || reducedMotion || hovered || !inView || items.length < 2)
+      return
     timer = gsap.delayedCall(holdFor + config.interval, () => {
       goTo(current + 1, 1)
       queueNext()
     })
   }
+
+  triggers.forEach((trigger, index) => {
+    if (!trigger) return
+    trigger.addEventListener('click', () => goTo(index))
+    if (config.hoverActivate) {
+      trigger.addEventListener('pointerenter', (event) => {
+        if (event.pointerType === 'mouse') goTo(index)
+      })
+    }
+  })
 
   wrap.addEventListener('pointerenter', () => {
     hovered = true
@@ -154,5 +149,5 @@ function initInstance(wrap) {
 }
 
 export function init() {
-  document.querySelectorAll('[data-featured-tabs="wrap"]').forEach(initInstance)
+  document.querySelectorAll('[data-hover-tab="wrap"]').forEach(initInstance)
 }

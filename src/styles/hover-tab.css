@@ -1,0 +1,15 @@
+/*
+  Hover Tab — structural companion to src/modules/hover-tab.js.
+
+  All layout and visual styling for the Hover Tab components lives in the
+  Designer. This only prevents a flash of stacked panes before the module
+  initializes (and hides the extras entirely if JS never runs).
+*/
+
+[data-hover-tab='wrap']:not([data-tabs-initialized])
+  [data-hover-tab='item']:not(:first-child)
+  [data-hover-tab='pane'] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
