@@ -1,0 +1,29 @@
+/*
+  Nav Hover Image — companion to src/modules/nav-image.js.
+
+  The preview images sit absolutely positioned on top of each other in the
+  Designer. All of them are hidden here (not in JS) so nothing flashes before
+  the module initializes; the module adds `is-active` to the one whose nav
+  link is hovered. Tune the fade via the custom property on a parent (e.g.
+  nav_wrap) in the Designer.
+*/
+
+[nav-image-id] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--_nav-image---fade-duration, 0.4s) ease,
+    visibility var(--_nav-image---fade-duration, 0.4s) ease;
+}
+
+[nav-image-id].is-active {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [nav-image-id] {
+    transition: none;
+  }
+}
