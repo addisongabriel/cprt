@@ -22,6 +22,14 @@ import gsap from 'gsap'
     data-tabs-autoplay        "false" disables the auto-advance loop
     data-tabs-hover-activate  "false" switches tabs on click only,
                               instead of activating on trigger hover
+    data-tabs-highlight       "false" disables the sliding active highlight
+    data-tabs-highlight-duration  seconds the highlight takes to glide
+                                  between triggers               (default 0.4)
+
+  The module also maintains a single div.hover-tab_active — a highlight that
+  glides from trigger to trigger as the active tab changes. If the wrap
+  already contains a .hover-tab_active element (authored in the Designer so it
+  can be styled there), it is adopted; otherwise one is created.
 */
 
 const DEFAULTS = {
@@ -45,6 +53,8 @@ function readConfig(wrap) {
     ease: wrap.getAttribute('data-tabs-ease') || DEFAULTS.ease,
     autoplay: wrap.getAttribute('data-tabs-autoplay') !== 'false',
     hoverActivate: wrap.getAttribute('data-tabs-hover-activate') !== 'false',
+    highlight: wrap.getAttribute('data-tabs-highlight') !== 'false',
+    highlightDuration: num('data-tabs-highlight-duration', 0.4),
   }
 }
 
@@ -75,6 +85,38 @@ function initInstance(wrap) {
     panes[index].style.pointerEvents = index === current ? 'auto' : 'none'
   })
 
+  // Sliding active-tab highlight: one div that glides between triggers.
+  // Adopt an authored .hover-tab_active inside the wrap if present, so it can
+  // be styled in the Designer; otherwise create it.
+  let highlight = null
+  if (config.highlight && triggers.every(Boolean)) {
+    highlight = wrap.querySelector('.hover-tab_active')
+    if (!highlight) {
+      highlight = document.createElement('div')
+      highlight.className = 'hover-tab_active'
+      wrap.append(highlight)
+    }
+  }
+
+  function moveHighlight(animate) {
+    if (!highlight) return
+    const wrapBox = wrap.getBoundingClientRect()
+    const box = triggers[current].getBoundingClientRect()
+    gsap.to(highlight, {
+      x: box.left - wrapBox.left,
+      y: box.top - wrapBox.top,
+      width: box.width,
+      height: box.height,
+      duration: animate && !reducedMotion ? config.highlightDuration : 0,
+      ease: config.ease,
+      overwrite: 'auto',
+    })
+  }
+
+  moveHighlight(false)
+  // Re-seat the highlight instantly whenever the layout shifts.
+  new ResizeObserver(() => moveHighlight(false)).observe(wrap)
+
   function goTo(next, forcedDirection) {
     next = (next + items.length) % items.length
     if (next === current) return
@@ -89,6 +131,7 @@ function initInstance(wrap) {
     items.forEach((item, index) =>
       item.classList.toggle('is-active', index === current)
     )
+    moveHighlight(true)
 
     gsap.killTweensOf([outgoing, incoming])
     const distance = direction * shiftPx()

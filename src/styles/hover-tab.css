@@ -13,3 +13,24 @@
   visibility: hidden;
   pointer-events: none;
 }
+
+/* Positioning context for the panes and the sliding highlight. */
+[data-hover-tab='wrap'] {
+  position: relative;
+}
+
+/*
+  Sliding active-tab highlight — created (or adopted) and positioned by the
+  module. Size and transform are set inline from the active trigger's box.
+  Restyle via the custom property below on hover-tab_wrap, or author your own
+  div.hover-tab_active inside the wrap in the Designer and the module will
+  use that instead. Triggers must be positioned with a z-index so their text
+  paints above the highlight.
+*/
+.hover-tab_active {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  background-color: var(--_hover-tab---active-bg, rgb(255 255 255 / 0.75));
+}

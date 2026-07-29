@@ -30,6 +30,16 @@ renamed freely in the Designer:
 - Toggles the Lumos **`is-active`** state class on the current Hover Tab Item
   root — style the active trigger/pane in the Designer with the state system
   (`--_state---true` / `--_state---false` formulas on descendants).
+- Maintains a single **`div.hover-tab_active`** highlight that glides from
+  trigger to trigger whenever the active tab changes (hover, click, or
+  auto-advance). It matches the active trigger's box each move, so it also
+  works if trigger sizes ever differ. If a `.hover-tab_active` element is
+  authored inside the wrap in the Designer it is adopted (style it there);
+  otherwise the module creates one, styled by `src/styles/hover-tab.css` with
+  the `--_hover-tab---active-bg` custom property (default white 75%). With the
+  highlight on, drop any per-item active *background* styling — keep `is-active`
+  styles for text color only. Triggers need `position` + `z-index` so their
+  text paints above the highlight.
 - Runs only while on screen (IntersectionObserver); transitions are instant
   and autoplay is off under `prefers-reduced-motion`.
 
@@ -57,3 +67,5 @@ per-instance control):
 | `data-tabs-ease`           | `power2.inOut` | GSAP ease name                                |
 | `data-tabs-autoplay`       | `true`         | `"false"` disables the loop                   |
 | `data-tabs-hover-activate` | `true`         | `"false"` = switch on click only              |
+| `data-tabs-highlight`      | `true`         | `"false"` disables the sliding highlight      |
+| `data-tabs-highlight-duration` | `0.4`      | Seconds the highlight glides between triggers |
