@@ -1,0 +1,13 @@
+/*
+  Custom CSS that Webflow's style panel can't express.
+
+  Lumos rules apply here the same as in the Designer:
+  - Reference variables (custom properties), never raw values.
+  - rem only — no px, including borders and radii.
+  - No breakpoint media queries; use fluid values, wrapping flex,
+    autofit grids, and container queries instead.
+  - Interactions are CSS-only via the trigger & state system:
+    ancestors carry data-trigger / data-state, descendants read
+    --_trigger---on/off and --_state---true/false inside calc(),
+    color-mix(), or transforms.
+*/
