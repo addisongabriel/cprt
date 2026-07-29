@@ -37,7 +37,7 @@ const DEFAULTS = {
   duration: 0.6,
   resumeDelay: 3,
   shift: 2,
-  ease: 'power2.inOut',
+  ease: 'expo.out',
 }
 
 function readConfig(wrap) {
