@@ -40,8 +40,11 @@ renamed freely in the Designer:
   otherwise the module creates one, styled by `src/styles/hover-tab.css` with
   the `--_hover-tab---active-bg` custom property (default white 75%). With the
   highlight on, drop any per-item active *background* styling — keep `is-active`
-  styles for text color only. Triggers need `position` + `z-index` so their
-  text paints above the highlight.
+  styles for text color only. Triggers need `position` + `z-index` **above the
+  highlight's z-index, on the trigger itself** — `hover-tab_item_trigger` has
+  `position: relative; z-index: 2` for this. A z-index on the title alone does
+  nothing: the trigger's `backdrop-filter` creates a stacking context that
+  traps its children's z-index, so the trigger must outrank the highlight.
 - Runs only while on screen (IntersectionObserver); transitions are instant
   and autoplay is off under `prefers-reduced-motion`.
 - CSS-only (no JS): hovering or keyboard-focusing the pane's `button_main_wrap`
