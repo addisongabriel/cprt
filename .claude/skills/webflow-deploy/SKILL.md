@@ -6,29 +6,43 @@ description: How custom JS/CSS ships from this repo to the CPRT Webflow site. Us
 # Webflow deploy workflow (GitHub → jsDelivr → Webflow)
 
 This repo is the single source of truth for the CPRT site's custom code. There
-is no Slater/Odyn — deploys are pure GitHub. A merge (or push) to `main` is a
-production deploy; it's live on the site about a minute later.
+is no Slater/Odyn — deploys are pure GitHub.
+
+**A deploy is three steps, not one.** Merging to `main` is only the first:
+
+1. Merge to `main` — CI builds `dist/` and verifies the CDN serves it.
+2. Update the `SHA` in the Webflow embed to the commit CI printed.
+3. Publish the site.
+
+Skip 2 or 3 and the site keeps loading the previous bundle, with no error
+anywhere — it just silently looks like the change didn't work. Do not tell the
+user a change is live after step 1.
 
 ## The pipeline
 
 1. Code lives in `src/` (modules in `src/modules/`, styles in `src/styles/` —
    conventions in `CLAUDE.md`). Vite bundles to `dist/main.js` + `dist/main.css`,
    and `dist/` is committed.
-2. jsDelivr serves those files straight from the repo:
-   - `https://cdn.jsdelivr.net/gh/addisongabriel/cprt@main/dist/main.js`
-   - `https://cdn.jsdelivr.net/gh/addisongabriel/cprt@main/dist/main.css`
+2. jsDelivr serves those files straight from the repo, from a **commit-pinned**
+   url — not `@main`. See the branch-alias gotcha below for why:
+   - `https://cdn.jsdelivr.net/gh/addisongabriel/cprt@<sha>/dist/main.js`
+   - `https://cdn.jsdelivr.net/gh/addisongabriel/cprt@<sha>/dist/main.css`
 3. `.github/workflows/deploy.yml` runs on every push to `main`: `npm ci` →
-   `npm run build` → commits `dist/` if it changed → purges the two jsDelivr
-   URLs. So even a src-only edit made in the GitHub UI deploys correctly.
-4. The Webflow site loads the two URLs via the site-wide embed below.
+   `npm run build` → commits `dist/` if it changed → best-effort `@main` purge →
+   **verifies the commit-pinned url actually serves the bytes just built, and
+   fails the deploy if it doesn't** → prints the SHA to put in the embed as a
+   job notice. So even a src-only edit made in the GitHub UI deploys correctly.
+4. The Webflow site loads the two urls via the site-wide embed below.
 
 **Deploy = get the change onto `main`.** The normal path: branch → PR → merge.
 The user has delegated merging: mark the PR ready and merge it yourself, then
 confirm the Deploy action ran green. CI handles build + cache purge.
 
 **Ship to `main` as soon as it builds — don't park it in a draft PR.** Nothing
-on a feature branch is reachable from the site: jsDelivr pins `@main`, so an
-unmerged branch is invisible to the browser and the user cannot test it at all.
+on a feature branch is reachable from the site: the embed loads a commit on
+`main`, so an unmerged branch is invisible to the browser and the user cannot
+test it at all. Then immediately do steps 2 and 3 above — merging alone puts
+nothing in front of the user.
 Local testing (headless Chromium against `dist/`) proves the module logic, not
 the integration — the real markup, CMS-bound attributes, and Designer CSS only
 exist on the site, so "it passes locally" is not "it works." For any change the
@@ -43,9 +57,14 @@ Lives in Site Settings → Custom code → Head code. Canonical copy — if it n
 changing, update it here too:
 
 ```html
-<!-- CPRT custom code — served from github.com/addisongabriel/cprt -->
+<!-- CPRT custom code — served from github.com/addisongabriel/cprt
+     Pinned to a commit SHA on purpose: jsDelivr's @main branch alias caches the
+     branch→commit mapping for ~12h and the purge API does not reset it, so @main
+     can serve a stale bundle for hours. A commit URL is immutable.
+     UPDATE THE SHA BELOW ON EVERY DEPLOY, or the site keeps loading old code. -->
 <script>
   (() => {
+    const SHA = '<commit sha — the Deploy run prints it>'
     if (localStorage.getItem('cprt-dev') === 'true') {
       // Dev mode: load the local Vite server (npm run dev). CSS is injected
       // by Vite through the JS import, so one module script is enough.
@@ -54,17 +73,24 @@ changing, update it here too:
       s.src = 'http://localhost:5173/src/main.js'
       document.head.append(s)
     } else {
+      const base = `https://cdn.jsdelivr.net/gh/addisongabriel/cprt@${SHA}/dist/`
       const l = document.createElement('link')
       l.rel = 'stylesheet'
-      l.href = 'https://cdn.jsdelivr.net/gh/addisongabriel/cprt@main/dist/main.css'
+      l.href = base + 'main.css'
       const s = document.createElement('script')
       s.defer = true
-      s.src = 'https://cdn.jsdelivr.net/gh/addisongabriel/cprt@main/dist/main.js'
+      s.src = base + 'main.js'
       document.head.append(l, s)
     }
   })()
 </script>
 ```
+
+Only the `SHA` line changes between deploys. Update it with
+`data_scripts_tool > set_site_freeform_code` (rewrites the whole block, so send
+the badge `<style>` along with it) or by hand in the Designer, then publish.
+Worth automating from CI with a Webflow API token in repo secrets — not set up
+yet.
 
 Dev mode toggle (per browser, per device) — run in the console:
 `localStorage.setItem('cprt-dev', 'true')` / `localStorage.removeItem('cprt-dev')`.
@@ -88,10 +114,20 @@ splitting, the embed's prod branch must switch to `type="module"`.
 - **`main` is the deploy branch.** jsDelivr can't address branch names with
   slashes, so deploys pin `@main`. Feature branches follow the
   `claude/<feature>` naming; PRs target `main`.
-- **Cache behavior:** the CI purge clears jsDelivr's edge cache. A browser
-  that recently loaded the old file may hold it up to its max-age — when
-  verifying a deploy, hard-refresh, or curl the CDN URL and diff against
-  `dist/` in the repo.
+- **`@main` cannot be reliably refreshed — this cost hours once.** jsDelivr
+  caches the branch→commit mapping for ~12h, and the purge API does **not** reset
+  it: purging `@main/dist/main.js` clears the file, then jsDelivr re-resolves
+  `main` from its own stale mapping and serves the same old commit again. The
+  purge response still says `"status": "finished"` with every provider `true`, so
+  CI goes green while the site loads a bundle from hours ago. Observed: two
+  successful purges 20 minutes apart, CDN still serving a pre-merge bundle.
+  Hence commit pinning — and hence the CI step that compares served bytes to
+  built bytes, which is the only thing that actually catches this.
+- **Browser cache is a separate layer.** A browser holding the old file will
+  disagree with the CDN. `fetch(url, { cache: 'reload' })` in the console reads
+  the CDN directly and is the way to tell the two apart: if that shows the new
+  bundle but the page doesn't, it's the browser; if it shows the old bundle, it's
+  the CDN.
 - **Verify the embed is site-wide before blaming the code.** It belongs in Site
   Settings → Custom code → Head. It can silently end up in a single page's
   page-level head code instead — then the bundle loads on that one page and
@@ -119,8 +155,12 @@ splitting, the embed's prod branch must switch to `type="module"`.
 ## Verifying a deploy
 
 1. Deploy action green on `main` — `mcp__github__actions_get > get_workflow_run`.
-   This is the check that's always available; the purge step prints jsDelivr's
-   response.
+   This is the check that's always available, and it now means something: the
+   run fails if the commit-pinned CDN url doesn't serve the bytes just built.
+   Green here rules out the whole CDN layer. Grab the SHA from the run's notice
+   (or `get_job_logs`) for the embed.
+   **Do not read the purge step as proof of anything** — it is best-effort and
+   reports success even when `@main` stays stale.
 2. `curl -s https://cdn.jsdelivr.net/gh/addisongabriel/cprt@main/dist/main.js | tail -c 200`
    and diff against the repo's `dist/main.js`. **This usually fails from a
    Claude Code cloud session** — the environment's network policy 403s the
@@ -146,11 +186,19 @@ module.
 
 1. **Is it on `main`?** `git log origin/main --oneline -1`. A draft PR is not
    deployed. This is the most common cause by far.
-2. **Is the embed site-wide?** See the gotcha above — a page-level embed makes
+2. **Does the embed's `SHA` match the commit you want?** A stale SHA loads old
+   code with no error at all. Read it with
+   `data_scripts_tool > get_site_freeform_code`.
+3. **Is the embed site-wide?** See the gotcha above — a page-level embed makes
    it work on exactly one page.
-3. **Has the site been published since the last custom-code change?**
-4. **Did the Deploy action pass?**
-5. **Is the module's selector actually in the published markup?** Every `init()`
+4. **Has the site been published since the last custom-code change?**
+5. **Did the Deploy action pass?** Its CDN-verify step fails on a stale or
+   missing bundle; check the run, not just the merge.
+6. **Is the CDN actually serving the new bytes?** Have the user run
+   `fetch(url, { cache: 'reload' }).then(r => r.text()).then(t => console.log(t.length))`
+   and compare with `wc -c < dist/main.js`. A size match means the CDN is fine
+   and the problem is downstream.
+7. **Is the module's selector actually in the published markup?** Every `init()`
    bails silently by design, so a missing hook attribute looks identical to a
    broken script. Attributes inside Webflow **component definitions** are easy
    to miss: a page-level `data_element_tool > query_elements` does **not**
@@ -159,7 +207,7 @@ module.
    components need their own scoped query), or just read the rendered DOM in the
    browser — and treat the user's inspector as better evidence than a negative
    API query.
-6. **Only then suspect the code.**
+8. **Only then suspect the code.**
 
 ## Reusing this setup for another Webflow project
 

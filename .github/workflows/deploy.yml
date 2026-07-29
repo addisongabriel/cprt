@@ -1,10 +1,14 @@
-# Deploy: build the bundle and refresh the CDN on every push to main.
+# Deploy: build the bundle and verify the CDN is serving it, on every push to main.
 #
-# jsDelivr serves dist/ straight from this repo
-# (https://cdn.jsdelivr.net/gh/addisongabriel/cprt@main/dist/...), but caches
-# branch URLs for ~12h. This workflow rebuilds dist/ (so a src-only push can
-# never ship a stale bundle), commits it if it changed, and purges the CDN so
-# pushes are live in about a minute.
+# jsDelivr serves dist/ straight from this repo. The Webflow embed loads a
+# COMMIT-PINNED url (…/gh/addisongabriel/cprt@<sha>/dist/…) rather than @main,
+# because branch aliases are not reliably refreshable: jsDelivr caches the
+# branch→commit mapping for ~12h and the purge API does not reset it, so @main
+# can serve a bundle that is hours old while purge reports success. Commit URLs
+# are immutable, so a new commit is a new url that cannot be stale.
+#
+# Cost of that choice: the SHA in the Webflow embed must be updated per deploy
+# (and the site published). This workflow prints the SHA to use as a job notice.
 #
 # Requires the repo to be public — jsDelivr does not serve private repos.
 
@@ -38,7 +42,9 @@ jobs:
       - run: npm run build
 
       - name: Commit dist if it changed
+        id: dist
         run: |
+          set -e
           if ! git diff --quiet -- dist; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -46,11 +52,42 @@ jobs:
             git commit -m "Build dist [skip ci]"
             git push
           fi
+          # The SHA to pin the embed to is whichever commit actually holds dist/,
+          # which is this new one when the step above committed a rebuild.
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Purge jsDelivr cache
+        continue-on-error: true
         run: |
-          set -e
           for file in main.js main.css; do
-            curl -fsS "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@main/dist/${file}"
+            curl -fsS "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@main/dist/${file}" || true
             echo
           done
+
+      # The purge above is best-effort only: jsDelivr caches the @main branch to
+      # commit mapping for ~12h and purging does not reset it, so @main can keep
+      # serving an old bundle while the purge API still reports "finished". The
+      # commit-pinned URL below is immutable, so this check is the real gate —
+      # it fails the deploy if the CDN is not serving what was just built.
+      - name: Verify the CDN serves this commit's bundle
+        run: |
+          set -uo pipefail
+          sha='${{ steps.dist.outputs.sha }}'
+          status=0
+          for file in main.js main.css; do
+            url="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${sha}/dist/${file}"
+            # The first request also warms jsDelivr's cache for the pinned URL.
+            served=$(curl -fsS --retry 6 --retry-all-errors --retry-delay 5 "$url" | wc -c)
+            built=$(wc -c < "dist/${file}")
+            if [ "$served" -ne "$built" ]; then
+              echo "::error title=Stale CDN::${file}: CDN served ${served} bytes, build produced ${built}"
+              status=1
+            else
+              echo "${file}: ${served} bytes, matches the build"
+            fi
+          done
+          exit $status
+
+      - name: Embed SHA to publish
+        run: |
+          echo "::notice title=Update the Webflow embed::Set SHA to '${{ steps.dist.outputs.sha }}' in Site Settings -> Custom code -> Head, then publish the site."
