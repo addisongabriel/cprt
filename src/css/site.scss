@@ -1,0 +1,123 @@
+// Site styles — compiled to dist/css/site.css and injected by the engine
+// (Page.loadEngineCSS in src/site.ts). No <link> is needed in Webflow.
+//
+// This holds only what Webflow's style panel can't express: the states each
+// component depends on before and while its JavaScript runs. Layout and visual
+// styling stay in the Designer.
+//
+// Lumos rules apply here as they do in the Designer: reference variables rather
+// than raw values, rem only (never px), and no breakpoint media queries — use
+// fluid values, wrapping flex, autofit grids, and container queries.
+
+// ---------------------------------------------------------------------------
+// Hover Tab — companion to src/components/hover-tab.ts
+// ---------------------------------------------------------------------------
+
+// Positioning context for the panes and the sliding highlight.
+[sse-component='hover-tab'] {
+  position: relative;
+}
+
+// Prevents a flash of stacked panes before the component initializes, and hides
+// the extras entirely if JavaScript never runs. The component sets
+// data-hover-tab-ready once it owns the panes.
+[sse-component='hover-tab']:not([data-hover-tab-ready]) {
+  [data-hover-tab='item']:not(:first-child),
+  [sse-part='item']:not(:first-child) {
+    [data-hover-tab='pane'],
+    [sse-part='pane'] {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+  }
+}
+
+// Sliding active-tab highlight — created (or adopted) and positioned by the
+// component, as a child of the items' container (hover-tab_slot) so it shares
+// the triggers' stacking context. Size and transform are set inline from the
+// active trigger's box. Restyle with the custom property below on
+// hover-tab_wrap, or author your own div.hover-tab_active inside the slot in
+// the Designer and the component will use that instead. Triggers must be
+// positioned with a z-index so their text paints above the highlight.
+.hover-tab_active {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  background-color: var(--_hover-tab---active-bg, rgb(255 255 255 / 0.75));
+}
+
+// Pane image zooms while the pane's main button is hovered (or keyboard
+// focused). Scoped to panes so the shared u-image utilities stay untouched
+// everywhere else. Tune with the custom properties on hover-tab_wrap.
+[data-hover-tab='pane'],
+[sse-part='pane'] {
+  overflow: clip;
+
+  .u-image-wrapper {
+    transition: transform var(--_hover-tab---zoom-duration, 0.6s) ease;
+  }
+
+  &:has(.button_main_wrap:hover) .u-image-wrapper,
+  &:has(.button_main_wrap:focus-within) .u-image-wrapper {
+    transform: scale(var(--_hover-tab---zoom-scale, 1.05));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-hover-tab='pane'] .u-image-wrapper,
+  [sse-part='pane'] .u-image-wrapper {
+    transition: none;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Nav Hover Image — companion to src/components/nav-hover-image.ts
+// ---------------------------------------------------------------------------
+//
+// State only: no transition, no duration, no easing. The site's own CSS on the
+// images owns the cross-fade, so `transition: opacity 200ms <ease>` there is
+// what runs it.
+//
+// `!important` on opacity makes this the single authority on which image shows,
+// so a more specific rule elsewhere can't outrank it. It doesn't affect the
+// cross-fade — !important changes cascade priority, not transitions.
+//
+// `visibility: inherit !important` neutralizes any per-item visibility rule on
+// the images (the kind that hides them all and un-hides only the hovered one).
+// Left in place, such a rule silently defeats everything here: opacity 1 on the
+// fallback image means nothing while visibility keeps it hidden. `inherit`
+// rather than `visible` on purpose — the images live inside a dropdown whose
+// closed state is visibility:hidden, and inheriting means they follow that
+// open/closed state instead of leaking out of a closed dropdown.
+//
+// Everything is gated on the [data-nav-hover-on] marker, which the component
+// sets only once it has found images and painted a state. That keeps it
+// fail-safe: with no hooks found, none of these rules apply and the markup
+// behaves exactly as it would without the component.
+
+[data-nav-hover-on] {
+  [nav-image-id],
+  [data-nav-image-id] {
+    opacity: 0 !important;
+    // The images are a hover preview, never a click target.
+    pointer-events: none;
+    visibility: inherit !important;
+  }
+
+  [nav-image-id].is-nav-image-active,
+  [data-nav-image-id].is-nav-image-active {
+    opacity: 1 !important;
+  }
+}
+
+// Suppresses transitions until the first state has painted — otherwise applying
+// opacity 0 would animate through the site's own transition and flash the whole
+// stack on load.
+[data-nav-hover-on]:not([data-nav-hover-ready]) {
+  [nav-image-id],
+  [data-nav-image-id] {
+    transition: none !important;
+  }
+}
