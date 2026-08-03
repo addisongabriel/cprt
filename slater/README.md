@@ -34,6 +34,17 @@ Copy the file contents straight into Slater's JS panel.
 | File | Purpose | Docs |
 | ---- | ------- | ---- |
 | `nav-hover-image.js` | Hovering a `nav-link-id` element cross-fades in the `nav-image-id` image with the same id | `docs/nav-hover-image-webflow.md` |
+| `map-embed.js` | Turns a `data-map-url` Google Maps URL into a keyless iframe that fills its container | `docs/map-embed-webflow.md` |
+
+`map-embed.js` also works pasted between `<script>` tags in a Webflow HTML
+Embed — inside a component, so the map ships its own code — which is the one
+case here that isn't about Slater. It styles the iframe inline and needs no
+stylesheet. Its bundled twin (`src/modules/map-embed.js`) is behaviorally
+identical; it differs only in running on `init()` from `main.js` instead of
+immediately, taking its iframe styling from `main.css`, and skipping the
+`MutationObserver` re-scan (call `window.CPRT.mapEmbed.refresh()` instead).
+Loading both on one page is harmless but pointless — each would skip the
+other's already-built maps.
 
 ## Divergence warning
 
