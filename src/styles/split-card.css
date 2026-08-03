@@ -1,0 +1,98 @@
+/*
+  Split Card — structural companion to src/modules/split-card.js.
+
+  Two jobs the Designer can't express:
+
+  1. The section has to be as tall as the sequence is long — one viewport of
+     scroll per image — while the wrap sticks at viewport height. That is what
+     turns a tall section into a scroll sequence rather than a very long card.
+  2. Only the first image may show before the module initializes, so the stack
+     doesn't flash its topmost image on load. If JS never runs, the first image
+     is what's left visible.
+
+  --image-count is counted here with :has() so the height is right before JS
+  runs; the module then sets it inline from the real number of wrappers, which
+  also covers stacks longer than the chain below. The chains key on the class
+  names rather than the hook attributes on purpose — this is the pre-JS
+  fallback, and the module (which reads attributes) is authoritative once it
+  runs. Counting .u-image-wrapper, not .u-image: the images each sit in their
+  own wrapper, so they are never siblings of each other, and nested :has() is
+  invalid CSS.
+*/
+
+:is(
+  .split-card_section,
+  [sse-component='split-card'],
+  [data-split-card='section']
+) {
+  --image-count: 1;
+  height: calc(100vh * var(--image-count));
+}
+
+.split-card_section:has(.split-card_feature > .u-image-wrapper) {
+  --image-count: 1;
+}
+.split-card_section:has(.split-card_feature > .u-image-wrapper ~ .u-image-wrapper) {
+  --image-count: 2;
+}
+.split-card_section:has(
+    .split-card_feature > .u-image-wrapper ~ .u-image-wrapper ~ .u-image-wrapper
+  ) {
+  --image-count: 3;
+}
+.split-card_section:has(
+    .split-card_feature
+      > .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+  ) {
+  --image-count: 4;
+}
+.split-card_section:has(
+    .split-card_feature
+      > .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+  ) {
+  --image-count: 5;
+}
+.split-card_section:has(
+    .split-card_feature
+      > .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+      ~ .u-image-wrapper
+  ) {
+  --image-count: 6;
+}
+
+/*
+  The sticky frame the sequence plays inside. Set data-split-card-pin-wrap
+  ="true" on the section instead to hand the pinning to GSAP — the module
+  clears this position when it does.
+*/
+:is(.split-card_wrap, [sse-part='wrap'], [data-split-card='wrap']) {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+/*
+  Pre-init state: the wrappers are stacked, so without this the last one shows
+  until the module sets opacity. Dropped as soon as the module initializes,
+  after which its inline opacity is what drives the sequence.
+*/
+:is(
+    .split-card_section,
+    [sse-component='split-card'],
+    [data-split-card='section']
+  ):not([data-split-card-initialized])
+  :is(.split-card_feature, [sse-part='feature'], [data-split-card='feature'])
+  > .u-image-wrapper:not(:first-child) {
+  opacity: 0;
+}
