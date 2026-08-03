@@ -1,0 +1,27 @@
+/*
+  Map Embed — structural companion to src/modules/map-embed.js.
+
+  The map's size is Designer-owned: the hook element is the container, and the
+  iframe fills it edge to edge at 100% × 100%. Give the element a height in the
+  Designer, or set --_map---ratio (e.g. 16 / 9) to let it size from its width.
+*/
+
+[data-map='embed'],
+[data-map-url] {
+  position: relative;
+  aspect-ratio: var(--_map---ratio, auto);
+}
+
+iframe[data-map-frame] {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* A CMS-bound URL is data for the module, never something to paint. */
+[data-map='url'] {
+  display: none;
+}
