@@ -24,6 +24,24 @@ renamed freely in the Designer:
   direction of travel (right when advancing right, left when going left) and
   immediately becomes unclickable; the incoming pane follows in from the
   opposite side. Inactive panes stay `visibility: hidden` / unclickable.
+- **Parallax between the pane's layers.** The background — `.u-image-wrapper`
+  plus the Media Overlay — rides the pane's own translate for the full
+  `data-tabs-shift` (2rem), while the foreground `.hover-tab_contents` travels
+  only `data-tabs-contents-shift`, half of that by default, so the copy trails
+  the image. Set the two equal to go back to one flat layer.
+
+  The foreground is moved by a **counter-transform on top of the pane's**
+  rather than by animating each layer on its own. That is deliberate:
+  `.u-image-wrapper` carries a `transform` transition and a `scale()` hover
+  zoom (both Designer-set, plus the rule in `src/styles/hover-tab.css`), and an
+  inline transform from GSAP would outrank the stylesheet and silently kill the
+  zoom. So the module never touches the image's transform.
+
+  Consequence for the Designer: `.hover-tab_contents`' transform belongs to the
+  module — don't also transform it there. Its `position: relative; z-index: 10`
+  must stay, or the new stacking context will drop the copy behind the image.
+  The pane's `left: -2rem / right: -2rem` bleed is what hides the travel, so
+  raising `data-tabs-shift` past 2rem means widening that inset too.
 - Activates an item when its trigger is hovered (mouse only) or clicked.
 - Hovering anywhere inside the component pauses the loop; after the pointer
   leaves it stays paused for the resume delay, then the cadence resumes.
@@ -72,8 +90,9 @@ per-instance control):
 | `data-tabs-interval`       | `5`            | Seconds between auto-advances                 |
 | `data-tabs-duration`       | `0.6`          | Seconds per pane transition                   |
 | `data-tabs-resume-delay`   | `3`            | Extra seconds paused after the pointer leaves |
-| `data-tabs-shift`          | `2`            | Rem the panes travel while crossfading        |
-| `data-tabs-ease`           | `power2.inOut` | GSAP ease name                                |
+| `data-tabs-shift`          | `2`            | Rem the pane (and its background) travels     |
+| `data-tabs-contents-shift` | half of `data-tabs-shift` | Rem the foreground (`.hover-tab_contents`) travels |
+| `data-tabs-ease`           | `expo.out`     | GSAP ease name                                |
 | `data-tabs-autoplay`       | `true`         | `"false"` disables the loop                   |
 | `data-tabs-hover-activate` | `true`         | `"false"` = switch on click only              |
 | `data-tabs-highlight`      | `true`         | `"false"` disables the sliding highlight      |

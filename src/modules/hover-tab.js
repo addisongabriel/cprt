@@ -18,7 +18,9 @@ import gsap from 'gsap'
     data-tabs-resume-delay    extra seconds the loop stays paused
                               after the pointer leaves the component  (default 3)
     data-tabs-shift           rem the panes travel while crossfading  (default 2)
-    data-tabs-ease            GSAP ease name                          (default power2.inOut)
+    data-tabs-contents-shift  rem the pane's foreground travels
+                              (default: half of data-tabs-shift)
+    data-tabs-ease            GSAP ease name                          (default expo.out)
     data-tabs-autoplay        "false" disables the auto-advance loop
     data-tabs-hover-activate  "false" switches tabs on click only,
                               instead of activating on trigger hover
@@ -30,6 +32,19 @@ import gsap from 'gsap'
   glides from trigger to trigger as the active tab changes. If the wrap
   already contains a .hover-tab_active element (authored in the Designer so it
   can be styled there), it is adopted; otherwise one is created.
+
+  Parallax: the pane's background layers (.u-image-wrapper and the media
+  overlay) ride the pane's own translate at the full `shift`, while the
+  foreground (.hover-tab_contents) is counter-translated so its *net* travel is
+  `contentsShift` — half the background by default. Moving the foreground by a
+  counter-transform on top of the pane's, rather than driving each layer
+  independently, is deliberate: it leaves .u-image-wrapper's `transform`
+  untouched, so the CSS-only hover zoom in src/styles/hover-tab.css keeps
+  working. An inline transform from GSAP would beat that stylesheet rule and
+  silently kill the zoom.
+
+  Consequence: .hover-tab_contents' transform is owned by this module — don't
+  also transform it in the Designer.
 */
 
 const DEFAULTS = {
@@ -37,6 +52,7 @@ const DEFAULTS = {
   duration: 0.6,
   resumeDelay: 3,
   shift: 2,
+  contentsRatio: 0.5,
   ease: 'expo.out',
 }
 
@@ -45,11 +61,15 @@ function readConfig(wrap) {
     const value = parseFloat(wrap.getAttribute(name))
     return Number.isFinite(value) ? value : fallback
   }
+  const shift = num('data-tabs-shift', DEFAULTS.shift)
   return {
     interval: num('data-tabs-interval', DEFAULTS.interval),
     duration: num('data-tabs-duration', DEFAULTS.duration),
     resumeDelay: num('data-tabs-resume-delay', DEFAULTS.resumeDelay),
-    shift: num('data-tabs-shift', DEFAULTS.shift),
+    shift,
+    // Foreground travel, in the same rem unit as `shift`. Half of it by
+    // default, so the copy trails the background image.
+    contentsShift: num('data-tabs-contents-shift', shift * DEFAULTS.contentsRatio),
     ease: wrap.getAttribute('data-tabs-ease') || DEFAULTS.ease,
     autoplay: wrap.getAttribute('data-tabs-autoplay') !== 'false',
     hoverActivate: wrap.getAttribute('data-tabs-hover-activate') !== 'false',
@@ -69,10 +89,21 @@ function initInstance(wrap) {
   if (items.length === 0 || panes.includes(null)) return
   wrap.setAttribute('data-tabs-initialized', '')
 
+  // Foreground layer of each pane, translated against the pane to slow it down.
+  // Attribute first so the class can be renamed in the Designer; null where a
+  // pane has no separate foreground, which just means no parallax for that one.
+  const contents = panes.map((pane) =>
+    pane.querySelector('[data-hover-tab="contents"], .hover-tab_contents')
+  )
+
   const config = readConfig(wrap)
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const shiftPx = () =>
-    config.shift * parseFloat(getComputedStyle(document.documentElement).fontSize)
+  const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize)
+  const shiftPx = () => config.shift * remPx()
+  // How far the foreground must travel *against* the pane for its net movement
+  // to be `contentsShift`. Negative while the foreground moves less than the
+  // background, and 0 when the two are set equal (the pre-parallax behaviour).
+  const counterPx = () => (config.contentsShift - config.shift) * remPx()
 
   let current = 0
   let hovered = false
@@ -82,6 +113,7 @@ function initInstance(wrap) {
   items.forEach((item, index) => {
     item.classList.toggle('is-active', index === current)
     gsap.set(panes[index], { autoAlpha: index === current ? 1 : 0 })
+    if (contents[index]) gsap.set(contents[index], { x: 0 })
     panes[index].style.pointerEvents = index === current ? 'auto' : 'none'
   })
 
@@ -131,14 +163,19 @@ function initInstance(wrap) {
     const direction = forcedDirection ?? (next > current ? 1 : -1)
     const outgoing = panes[current]
     const incoming = panes[next]
+    const outgoingContents = contents[current]
+    const incomingContents = contents[next]
     current = next
     items.forEach((item, index) =>
       item.classList.toggle('is-active', index === current)
     )
     moveHighlight(true)
 
-    gsap.killTweensOf([outgoing, incoming])
+    gsap.killTweensOf(
+      [outgoing, incoming, outgoingContents, incomingContents].filter(Boolean)
+    )
     const distance = direction * shiftPx()
+    const counter = direction * counterPx()
     const duration = reducedMotion ? 0 : config.duration
 
     outgoing.style.pointerEvents = 'none'
@@ -149,6 +186,17 @@ function initInstance(wrap) {
       { autoAlpha: 0, x: -distance },
       { autoAlpha: 1, x: 0, duration, ease: config.ease }
     )
+
+    // Same duration and ease as the panes, so the two layers stay locked
+    // together and only their travel distance differs.
+    if (outgoingContents)
+      gsap.to(outgoingContents, { x: counter, duration, ease: config.ease })
+    if (incomingContents)
+      gsap.fromTo(
+        incomingContents,
+        { x: -counter },
+        { x: 0, duration, ease: config.ease }
+      )
   }
 
   function stopTimer() {
