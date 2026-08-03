@@ -18,6 +18,13 @@ Skip 2 or 3 and the site keeps loading the previous bundle, with no error
 anywhere — it just silently looks like the change didn't work. Do not tell the
 user a change is live after step 1.
 
+> **A migration off jsDelivr is staged but not yet active.** `vercel.json` is in
+> the repo and the plan is in "Migrating to Vercel" at the bottom of this file.
+> Until the one-time GitHub→Vercel link is done, **the three steps above are
+> still the live pipeline** — keep pinning the SHA and publishing. Do not point
+> the Webflow embed at a Vercel URL before that link exists: an unlinked project
+> serves a URL that looks live and never updates, which is worse than today.
+
 ## The pipeline
 
 1. Code lives in `src/` (modules in `src/modules/`, styles in `src/styles/` —
@@ -215,3 +222,89 @@ Copy this repo's `vite.config.js`, `.github/workflows/deploy.yml` (swap the
 repo path in the purge URLs — it uses `GITHUB_REPOSITORY`, so only the embed
 snippet needs new URLs), the embed snippet (rename the `cprt-dev` localStorage
 key), and this skill. Repo must be public, deploy branch must be `main`.
+
+## Migrating to Vercel (staged, not yet active)
+
+**Why.** The three-step deploy above exists entirely because jsDelivr caches a
+branch alias for ~12h and cannot be reliably purged, so the embed has to pin an
+immutable commit URL — and that SHA is a manual edit plus a Webflow publish on
+every deploy. Serving the bundle from a host whose cache *can* be invalidated
+removes both steps: the embed URL becomes permanent, and a merge to `main` is
+live on its own. It also drops the **repo must stay public** constraint, since
+jsDelivr is the only reason for that.
+
+`vercel.json` (committed) carries the whole config:
+
+- `buildCommand: npm run build`, `installCommand: npm ci`, `outputDirectory: dist`
+  — so the build settings come from the repo, not the dashboard.
+- `Cache-Control: public, max-age=0, must-revalidate` on `/main.js` and
+  `/main.css`. Every page load revalidates and Vercel answers `304` when the
+  bytes are unchanged, so a deploy propagates immediately at the cost of one
+  cheap conditional request. This is the whole point — do not "optimise" it into
+  a long `max-age`, which reintroduces exactly the staleness this migration
+  removes.
+- `Access-Control-Allow-Origin: *`, which a classic `<script src>` does not need
+  but costs nothing and keeps `fetch`-based debugging from the console working.
+
+### The one-time setup (dashboard, on the owner's account)
+
+1. Vercel → **Add New… → Project** → import `addisongabriel/cprt`.
+2. Accept the detected settings — `vercel.json` supplies build command, install
+   command and output directory, so nothing needs typing. Framework preset
+   "Other" is correct; this is a bundle, not a site, and there is no `index.html`,
+   so the project root will 404 by design. Only `/main.js` and `/main.css` matter.
+3. Deploy. Note the production URL (`https://<project>.vercel.app`).
+
+That link is the part that makes this auto-updating — Vercel redeploys on every
+push to `main` by itself. **Nothing in this repo can do it**, because it
+authenticates against the owner's Vercel account.
+
+### Then, and only then, swap the embed
+
+Replace the SHA-pinning block in Site Settings → Custom code → Head with this,
+and publish once. After this publish, deploys never need a Webflow publish again.
+
+```html
+<!-- CPRT custom code — built from github.com/addisongabriel/cprt, served by Vercel.
+     The URL is permanent: Vercel redeploys on every push to main and its cache
+     revalidates per request, so a merge to main is live on its own. No SHA to
+     bump and no publish needed for code changes. -->
+<script>
+  (() => {
+    const BASE = 'https://<project>.vercel.app/'
+    if (localStorage.getItem('cprt-dev') === 'true') {
+      const s = document.createElement('script')
+      s.type = 'module'
+      s.src = 'http://localhost:5173/src/main.js'
+      document.head.append(s)
+    } else {
+      const l = document.createElement('link')
+      l.rel = 'stylesheet'
+      l.href = BASE + 'main.css'
+      const s = document.createElement('script')
+      s.defer = true
+      s.src = BASE + 'main.js'
+      document.head.append(l, s)
+    }
+  })()
+</script>
+```
+
+Keep the badge-hiding `<style>` that shares this block — `set_site_freeform_code`
+replaces the whole thing.
+
+### After the swap
+
+- Verify: `curl -sI https://<project>.vercel.app/main.js` should show the
+  `must-revalidate` cache header, and the body length should equal
+  `wc -c < dist/main.js`. From a Claude Code cloud session this may be blocked
+  by the network policy (empty body, exit 56) — that is not evidence of a bad
+  deploy; see the verification notes above.
+- Rewrite the top of this file: the deploy becomes one step (merge), and steps 2
+  and 3 disappear.
+- `.github/workflows/deploy.yml` keeps its value — it still builds, commits
+  `dist/`, and is the CI gate — but its jsDelivr purge and commit-pinned verify
+  steps become dead weight and should be replaced with a check against the Vercel
+  URL. Leave them until the swap is confirmed working.
+- jsDelivr URLs keep working (commit URLs are immutable), so the swap is
+  reversible: put the old block back and publish.
