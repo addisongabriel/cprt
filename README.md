@@ -41,8 +41,15 @@ Commit the `dist/` output. It is served from this repo through jsDelivr:
 <script type="module" src="https://cdn.jsdelivr.net/gh/addisongabriel/cprt@main/dist/main.js"></script>
 ```
 
-Pin a tag or commit (`@v0.1.0` / `@<sha>`) instead of `@main` when you need
-cache-stable releases — jsDelivr caches `@main` for up to 12 hours.
+The live embed pins a commit SHA rather than `@main`, because jsDelivr caches the
+branch alias for ~12h and cannot be reliably purged. That is why a deploy is
+three steps — merge, bump the SHA in the Webflow embed, publish.
+
+A migration off jsDelivr onto Vercel is staged: `vercel.json` holds the build and
+cache-header config, and once the repo is linked to a Vercel project the embed
+URL becomes permanent and a merge to `main` goes live on its own. It needs one
+dashboard step on the repo owner's Vercel account first — see "Migrating to
+Vercel" in the `webflow-deploy` skill. Until then the three-step deploy stands.
 
 ## Structure
 
