@@ -115,3 +115,36 @@ GSAP and ScrollTrigger are bundled from npm into `dist/main.js`, the same way
 `hover-tab.js` and `nav-hover-image.js` use GSAP — nothing needs enabling on
 the Webflow side. Adding ScrollTrigger grew the bundle from ~77 kB to ~123 kB
 (~49 kB gzipped).
+
+### Why the trigger is created by hand
+
+The site also loads a Slater bundle in the site-wide footer code, and other
+custom code on the page can put its own GSAP on `window`. That matters here,
+because `gsap/ScrollTrigger` registers itself into `window.gsap` at import time
+whenever a global GSAP already exists. When it does, the bundled GSAP core
+never learns the plugin, and the `scrollTrigger: {}` shorthand inside
+`gsap.timeline()` has nothing to resolve — GSAP logs
+
+```
+Invalid property scrollTrigger set to {...} Missing plugin? gsap.registerPlugin()
+```
+
+and runs the timeline on its own clock. On screen that is the whole sequence
+fading through the images in the first couple of seconds after load, with no
+scroll sync at all. Which of the two scripts wins is a load-order race, so the
+same page can work on one load and not the next.
+
+Two things in the module keep that from happening:
+
+- the trigger is created with `ScrollTrigger.create({ animation: timeline })`
+  instead of the `scrollTrigger: {}` shorthand, which goes through the plugin
+  directly and works whichever core it bound itself to;
+- the timeline is built `paused: true`. A scrubbed timeline is driven by
+  progress rather than its own playhead, so pausing changes nothing when the
+  trigger attaches — and when it doesn't attach, the section holds on its first
+  image instead of playing itself out, and the module warns to the console.
+
+So the check when this section looks wrong again: open the console. A
+`[split-card] ScrollTrigger did not attach` warning means the trigger never got
+created; no warning and no scrolling means the section's measurements are off,
+which `data-split-card-markers="true"` will show.
