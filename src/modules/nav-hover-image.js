@@ -38,6 +38,15 @@ const WRAP_SELECTOR = '[data-nav-hover="wrap"]'
 const LINK_SELECTOR = '[nav-link-id], [data-nav-link-id]'
 const IMAGE_SELECTOR = '[nav-image-id], [data-nav-image-id]'
 
+/*
+  Property pages don't run the nav hover at all. Matched as a path prefix, so
+  one pattern covers every shape a property URL takes on this site:
+  /properties/<slug> (the static folder), /properties-cms/<slug> (the CMS
+  collection), /property-types/<slug>, and a bare /property or /properties
+  index. Anything not under a "propert…" first segment is unaffected.
+*/
+const SKIP_PATH = /^\/propert(y|ies)/i
+
 // Temporary diagnostic logging, so it's visible in the browser console whether
 // this module is loading, what hooks it found, and why it bailed. Flip to false
 // (or ask for it to be stripped) once the module is confirmed working on the
@@ -200,6 +209,11 @@ function initInstance(root) {
 }
 
 export function init() {
+  if (SKIP_PATH.test(window.location.pathname)) {
+    log(`off on property pages — skipping ${window.location.pathname}`)
+    return
+  }
+
   log('module loaded, scanning for hooks')
   const wraps = document.querySelectorAll(WRAP_SELECTOR)
   if (wraps.length > 0) {

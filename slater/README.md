@@ -57,6 +57,13 @@ now differ in behavior as well as implementation:
 | Cross-fade timing | the site's CSS on the images | GSAP, owns the duration |
 | Before first hover | first `nav-image-id` in DOM order is showing | nothing showing |
 | Pointer leaves a link | image stays — last hovered persists | fades back to rest |
+| Property pages | skipped — `SKIP_PATH` | skipped — `SKIP_PATH` |
+
+`SKIP_PATH` is the one rule the two builds deliberately share, and it is the one
+thing to change in both places at once: it lists the paths where the nav hover
+does not run at all (see `docs/nav-hover-image-webflow.md`). Because the Slater
+file is pasted rather than built, editing it here changes nothing on the site
+until it is re-pasted into Slater's JS panel.
 
 If both ever load on the same page, the second to initialize bails with an
 "already initialized" warning. Pick one delivery path per site.

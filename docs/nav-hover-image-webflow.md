@@ -89,6 +89,28 @@ What each outcome means:
 failures — they list the leftovers on each side, which is usually enough to spot
 a typo or a stale CMS slug.
 
+## Where it doesn't run
+
+Property pages are excluded — the script returns before it looks for any hooks,
+so on those pages the nav images are left entirely to the site's own CSS. The
+exclusion is a path prefix, `/^\/propert(y|ies)/i`, which covers:
+
+| Path | |
+| ---- | --- |
+| `/properties/<slug>` | the static Properties folder (e.g. `/properties/onyx-residences`) |
+| `/properties-cms/<slug>` | the Properties CMS collection |
+| `/property-types/<slug>` | the Property Types collection |
+| `/property`, `/properties` | a bare index at either slug |
+
+Both builds carry the same rule — `SKIP_PATH` near the top of
+`src/modules/nav-hover-image.js` and of `slater/nav-hover-image.js`. Edit both
+if the set of excluded paths changes; nothing keeps them in sync.
+
+In the Slater build the guard sits ahead of `injectStyles()` on purpose, so the
+`html[data-nav-hover-on]` rules are never added on those pages. That matters
+because those rules are `!important` — added with no script left to toggle
+them, they'd pin the whole image stack invisible.
+
 ## Scoping
 
 `data-nav-hover="wrap"` is optional:
