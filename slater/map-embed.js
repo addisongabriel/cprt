@@ -69,6 +69,32 @@
     return bias ? { lat: bias.lat, lng: bias.lng, exact: false } : null
   }
 
+  /*
+    A place's identity, rather than a point or a name. Google hands these out in
+    "copy link" URLs that carry no coordinates and no place name at all — a
+    `cid` URL is *only* an id, so without this there is nothing else to parse.
+
+    `cid` (decimal) and `ftid` (`0x<hex>:0x<hex>`) are the same identity in two
+    notations, and the keyless embed endpoint accepts either. Both render the
+    full Google place card, which beats a bare coordinate pin.
+  */
+  function findIdentity(url) {
+    var cid = url.searchParams.get('cid')
+    if (cid && /^\d+$/.test(cid)) return { cid: cid }
+
+    var ftid = url.searchParams.get('ftid')
+    if (ftid && /^0x[\da-f]+:0x[\da-f]+$/i.test(ftid)) return { ftid: ftid }
+
+    return null
+  }
+
+  // The same id, buried in the `data=` blob of a /place/ URL. Only a last
+  // resort — coordinates are the proven path and stay ahead of it.
+  function findBuriedFtid(url) {
+    var match = url.href.match(/!1s(0x[\da-f]+:0x[\da-f]+)/i)
+    return match ? { ftid: match[1] } : null
+  }
+
   function findZoom(url) {
     var viewport = url.href.match(/@-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,(\d+(?:\.\d+)?)z/)
     if (viewport) return viewport[1]
@@ -166,35 +192,57 @@
       }
     }
 
+    // The URL's own language, unless the Designer asked for a specific one.
+    var settings = Object.assign({}, config, {
+      lang: config.lang || url.searchParams.get('hl'),
+    })
+
     var directions = findDirections(url)
     if (directions) {
-      return { src: embedSrc({ saddr: directions.from, daddr: directions.to }, config) }
+      return { src: embedSrc({ saddr: directions.from, daddr: directions.to }, settings) }
     }
 
-    var zoom = config.zoom || findZoom(url)
+    var zoom = settings.zoom || findZoom(url)
+    var identity = findIdentity(url)
     var coords = findCoords(url)
     var query = findQuery(url)
 
+    // An explicit cid/ftid is the place itself — more precise than coordinates
+    // and better labeled, so it outranks both. data-map-prefer="name" still
+    // wins if the URL also carries a name to search for.
+    if (identity && !(query && settings.prefer === 'name')) {
+      return { src: embedSrc(Object.assign({ z: zoom }, identity), settings) }
+    }
+
     // A name beats coordinates that were only ever a viewport center, and the
     // author can ask for the name either way with data-map-prefer="name".
-    var useCoords = coords && !(query && (config.prefer === 'name' || !coords.exact))
+    var useCoords = coords && !(query && (settings.prefer === 'name' || !coords.exact))
 
     if (useCoords) {
       var point = coords.lat + ',' + coords.lng
       // With a marker the point is the search term; without one it's just the
       // center, which is what suppresses the pin.
-      var params = config.pin ? { q: point, z: zoom } : { ll: point, z: zoom }
-      return { src: embedSrc(params, config) }
+      var params = settings.pin ? { q: point, z: zoom } : { ll: point, z: zoom }
+      return { src: embedSrc(params, settings) }
     }
 
     if (query) {
       // Coordinates alongside the name bias the search to the right place
       // while still labeling the pin with the name.
       var near = coords ? coords.lat + ',' + coords.lng : null
-      return { src: embedSrc({ q: query, ll: near, z: zoom }, config) }
+      return { src: embedSrc({ q: query, ll: near, z: zoom }, settings) }
     }
 
-    return { error: "couldn't find a place, address, or coordinates in \"" + raw + '"' }
+    // Nothing readable in the params — but a /place/ URL still has the id in
+    // its `data=` blob, which is better than giving up.
+    var buried = findBuriedFtid(url)
+    if (buried) return { src: embedSrc(Object.assign({ z: zoom }, buried), settings) }
+
+    return {
+      error:
+        "couldn't find a place, address, or coordinates in \"" + raw + '". ' +
+        'Use Share → Embed a map and paste that URL instead.',
+    }
   }
 
   function readConfig(el) {

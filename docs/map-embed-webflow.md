@@ -49,6 +49,8 @@ Anything an author is plausibly holding when they think "the Google Maps link":
 | `…/maps/search/?api=1&query=Space+Needle` | that query |
 | `…/maps/dir/Boston/Providence` (or `?api=1&origin=…&destination=…`) | directions between the two |
 | `…/maps?q=…`, `?ll=…`, `?daddr=…` | whatever those params say |
+| `…/maps?cid=3450197597791569041` | that place, by id — the full Google place card |
+| `…/maps?ftid=0x89c2…:0xd134…` | same thing, in Google's hex notation |
 | `https://www.google.com/maps/embed?pb=…` (Share → **Embed a map**) | passed straight through, untouched |
 | A whole `<iframe …>` snippet copied from the Share panel | its `src` is extracted, then as above |
 | A plain address with no URL at all — `350 Fifth Ave, New York` | a search query |
@@ -58,6 +60,17 @@ resolve by following a redirect, which a browser can't do cross-origin. The
 module detects them and logs what to do instead: open the link and copy the
 full `google.com/maps` URL out of the address bar. This is the one input worth
 warning authors about, since the share sheet hands out short links by default.
+
+### An id beats a point
+
+A `cid` (or `ftid`) URL is a place's *identity*, not a location — Google hands
+these out from "copy link" on a business, and they carry no coordinates and no
+place name at all. When one is present it outranks everything below, because
+it's both exact and fully labeled: the map renders the complete place card.
+
+Only the URL's own params count here. The id also sits inside the `data=` blob
+of a `/place/` URL, but that's used only as a last resort, after coordinates and
+names, since coordinates are the better-proven path.
 
 ### Which point the pin lands on
 
@@ -107,6 +120,20 @@ control.
   does this automatically via a `MutationObserver`.
 - The URL parser is exported as `window.CPRT.mapEmbed.toEmbedSrc(url, config)`
   if you ever want to check what a given URL resolves to from the console.
+
+## When the map doesn't appear
+
+Open the console on the published page. There are only three outcomes, and they
+point at three different problems:
+
+| What you see | What it is |
+| ------------ | ---------- |
+| A `[map-embed]` warning naming your URL | The URL couldn't be parsed. The message says what to do — usually paste a Share → **Embed a map** URL instead, which always works. |
+| No warning, and no `<iframe>` inside the container in the inspector | The bundle isn't loading on that page. Check the embed snippet — see the `webflow-deploy` skill. |
+| No warning, an `<iframe>` **is** there, but nothing is visible | The container has no height. This is the most common one: the iframe fills its container, so a zero-tall container is a zero-tall map. Give the div a height in the Designer, or set `--_map---ratio`. |
+
+A map far below the fold builds only once you scroll near it, so check while the
+container is actually on screen.
 
 ## Styling expectations (Designer-owned)
 
