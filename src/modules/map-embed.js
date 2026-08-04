@@ -80,6 +80,32 @@ function findCoords(url) {
   return bias ? { ...bias, exact: false } : null
 }
 
+/*
+  A place's identity, rather than a point or a name. Google hands these out in
+  "copy link" URLs that carry no coordinates and no place name at all — a `cid`
+  URL is *only* an id, so without this there is nothing else in it to parse.
+
+  `cid` (decimal) and `ftid` (`0x<hex>:0x<hex>`) are the same identity in two
+  notations, and the keyless embed endpoint accepts either. Both render the full
+  Google place card, which is a better result than a bare coordinate pin.
+*/
+function findIdentity(url) {
+  const cid = url.searchParams.get('cid')
+  if (cid && /^\d+$/.test(cid)) return { cid }
+
+  const ftid = url.searchParams.get('ftid')
+  if (ftid && /^0x[\da-f]+:0x[\da-f]+$/i.test(ftid)) return { ftid }
+
+  return null
+}
+
+// The same id, buried in the `data=` blob of a /place/ URL. Only used as a last
+// resort — coordinates are the proven path and stay ahead of it.
+function findBuriedFtid(url) {
+  const match = url.href.match(/!1s(0x[\da-f]+:0x[\da-f]+)/i)
+  return match ? { ftid: match[1] } : null
+}
+
 function findZoom(url) {
   const viewport = url.href.match(
     /@-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,(\d+(?:\.\d+)?)z/
@@ -179,26 +205,37 @@ export function toEmbedSrc(input, config = {}) {
     }
   }
 
+  // The URL's own language, unless the Designer asked for a specific one.
+  const settings = { ...config, lang: config.lang || url.searchParams.get('hl') }
+
   const directions = findDirections(url)
   if (directions) {
-    return { src: embedSrc({ saddr: directions.from, daddr: directions.to }, config) }
+    return { src: embedSrc({ saddr: directions.from, daddr: directions.to }, settings) }
   }
 
-  const zoom = config.zoom || findZoom(url)
+  const zoom = settings.zoom || findZoom(url)
+  const identity = findIdentity(url)
   const coords = findCoords(url)
   const query = findQuery(url)
+
+  // An explicit cid/ftid is the place itself — more precise than coordinates
+  // and better labeled, so it outranks both. data-map-prefer="name" still wins
+  // if the URL also carries a name to search for.
+  if (identity && !(query && settings.prefer === 'name')) {
+    return { src: embedSrc({ ...identity, z: zoom }, settings) }
+  }
 
   // A name beats coordinates that were only ever a viewport center, and the
   // author can ask for the name either way with data-map-prefer="name".
   const useCoords =
-    coords && !(query && (config.prefer === 'name' || !coords.exact))
+    coords && !(query && (settings.prefer === 'name' || !coords.exact))
 
   if (useCoords) {
     const point = `${coords.lat},${coords.lng}`
     // With a marker the point is the search term; without one it's just the
     // center, which is what suppresses the pin.
     return {
-      src: embedSrc(config.pin ? { q: point, z: zoom } : { ll: point, z: zoom }, config),
+      src: embedSrc(settings.pin ? { q: point, z: zoom } : { ll: point, z: zoom }, settings),
     }
   }
 
@@ -206,10 +243,19 @@ export function toEmbedSrc(input, config = {}) {
     // Coordinates alongside the name bias the search to the right place while
     // still labeling the pin with the name.
     const near = coords ? `${coords.lat},${coords.lng}` : null
-    return { src: embedSrc({ q: query, ll: near, z: zoom }, config) }
+    return { src: embedSrc({ q: query, ll: near, z: zoom }, settings) }
   }
 
-  return { error: `couldn't find a place, address, or coordinates in "${raw}"` }
+  // Nothing readable in the params — but a /place/ URL still has the id in its
+  // `data=` blob, which is better than giving up.
+  const buried = findBuriedFtid(url)
+  if (buried) return { src: embedSrc({ ...buried, z: zoom }, settings) }
+
+  return {
+    error:
+      `couldn't find a place, address, or coordinates in "${raw}". ` +
+      'Use Share → Embed a map and paste that URL instead.',
+  }
 }
 
 function readConfig(el) {
