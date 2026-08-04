@@ -122,20 +122,12 @@ function initInstance(section) {
     wrap.style.position = 'relative'
   }
 
-  const timeline = gsap.timeline({
-    scrollTrigger: {
-      trigger: section,
-      start: 'top top',
-      end: 'bottom bottom',
-      // scrub: true hard-links to scroll; a number adds that many seconds of
-      // catch-up smoothing.
-      scrub: config.scrub > 0 ? config.scrub : true,
-      pin: config.pinWrap && wrap ? wrap : false,
-      pinSpacing: false,
-      invalidateOnRefresh: true,
-      markers: config.markers,
-    },
-  })
+  // Paused, and with no scrollTrigger in the timeline vars — both on purpose,
+  // see the ScrollTrigger.create() call below. A scrubbed timeline is driven
+  // by progress, never by its own playhead, so pausing costs nothing and is
+  // the guarantee that a sequence with no trigger attached sits still on the
+  // first image instead of playing itself out on page load.
+  const timeline = gsap.timeline({ paused: true })
 
   // One timeline unit per transition, which the section height maps to one
   // viewport of scroll: hold, then fade the next image in over the rest.
@@ -151,6 +143,38 @@ function initInstance(section) {
       timeline.to(items[index - 1], { opacity: 0, ease: config.ease, duration }, start)
     }
   })
+
+  // Driving the timeline through ScrollTrigger.create() rather than the
+  // `scrollTrigger: {}` shorthand in the timeline vars. The shorthand is
+  // resolved by whichever GSAP core the plugin registered itself into, and
+  // gsap/ScrollTrigger binds to `window.gsap` at import time if a global GSAP
+  // is already on the page — which is a race on this site, since other custom
+  // code loads its own GSAP. Losing that race left the bundled core with no
+  // scrollTrigger property to resolve: it logged "Invalid property
+  // scrollTrigger ... Missing plugin?" and played the timeline on its own
+  // clock, so the images faded through on page load with no scroll sync.
+  // Calling the plugin directly works whichever core it bound to.
+  const trigger = ScrollTrigger.create({
+    animation: timeline,
+    trigger: section,
+    start: 'top top',
+    end: 'bottom bottom',
+    // scrub: true hard-links to scroll; a number adds that many seconds of
+    // catch-up smoothing.
+    scrub: config.scrub > 0 ? config.scrub : true,
+    pin: config.pinWrap && wrap ? wrap : false,
+    pinSpacing: false,
+    invalidateOnRefresh: true,
+    markers: config.markers,
+  })
+
+  if (!trigger) {
+    // Nothing drives the timeline, and it is paused, so the section stays on
+    // its first image. Say so — silence here reads as "the sequence is broken"
+    // rather than "ScrollTrigger never attached".
+    console.warn('[split-card] ScrollTrigger did not attach; sequence disabled for', section)
+    return
+  }
 
   // Images that decode after init change the section's height, which moves
   // every start/end this trigger measured.
