@@ -50,6 +50,22 @@
   const RETRY_WINDOW = 10000
 
   /*
+    Property pages don't run the nav hover at all. Matched as a path prefix, so
+    one pattern covers every shape a property URL takes on this site:
+    /properties/<slug> (the static folder), /properties-cms/<slug> (the CMS
+    collection), /property-types/<slug>, and a bare /property or /properties
+    index. Anything not under a "propert…" first segment is unaffected.
+  */
+  const SKIP_PATH = /^\/propert(y|ies)/i
+
+  // Bailing here — before injectStyles() and before the MutationObserver — is
+  // what makes this a true no-op rather than a disabled script: the
+  // html[data-nav-hover-on] rules are never added, so the images keep whatever
+  // the site's own CSS gives them and nothing is left pinned by an !important
+  // rule with no script to undo it.
+  if (SKIP_PATH.test(location.pathname)) return
+
+  /*
     State only — no transition, no duration, no easing. Your CSS on the images
     owns the cross-fade.
 
