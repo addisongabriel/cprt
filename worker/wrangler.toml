@@ -1,0 +1,7 @@
+name = "cprt-map-resolve"
+main = "map-resolve.js"
+compatibility_date = "2025-01-01"
+
+# Nothing here is stateful: no KV, no D1, no secrets. The Worker's only job is
+# to follow a redirect that the browser can't, and Cloudflare's edge cache does
+# the remembering. See worker/README.md to deploy.

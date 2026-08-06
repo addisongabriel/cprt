@@ -54,12 +54,43 @@ Anything an author is plausibly holding when they think "the Google Maps link":
 | `https://www.google.com/maps/embed?pb=…` (Share → **Embed a map**) | passed straight through, untouched |
 | A whole `<iframe …>` snippet copied from the Share panel | its `src` is extracted, then as above |
 | A plain address with no URL at all — `350 Fifth Ave, New York` | a search query |
+| `https://maps.app.goo.gl/…` (Share → **Copy link**) | expanded via the resolver Worker, then as above — see [Short links](#short-links) |
 
-**Short links don't work** — `maps.app.goo.gl/…` and `goo.gl/maps/…` only
-resolve by following a redirect, which a browser can't do cross-origin. The
-module detects them and logs what to do instead: open the link and copy the
-full `google.com/maps` URL out of the address bar. This is the one input worth
-warning authors about, since the share sheet hands out short links by default.
+## Short links
+
+`maps.app.goo.gl/…` is what the Share sheet hands out by default, so it's what
+an author is most likely holding. **Those work** — but only because of one
+piece of infrastructure outside this repo.
+
+A short link is just an id; the destination appears only when something follows
+its redirect. A browser can't: Google serves no CORS headers on that host, so a
+`fetch()` from the site comes back opaque with the final URL stripped, and the
+link can't be iframed directly either. That one hop has to happen off the
+browser, and `worker/map-resolve.js` — a Cloudflare Worker — is all it is. The
+module calls it, gets the long URL back, and parses that exactly as if the
+author had pasted it. Everything downstream (`data-map-zoom`, `data-map-prefer`,
+the pin rules below) behaves identically.
+
+**Setup is one deploy, once.** See [`worker/README.md`](../worker/README.md):
+deploy it, paste the URL into `RESOLVER` at the top of
+`src/modules/map-embed.js`, rebuild. Until that's done, `RESOLVER` is empty and
+short links log the old "open it and copy the full URL" warning — which is also
+the honest fallback if the Worker ever goes away. Nothing else regresses.
+
+What this costs at runtime, once wired:
+
+- **One request per unique link, not per map.** Answers are cached in the
+  visitor's `sessionStorage`, deduplicated in memory across a Collection List
+  (ten cards sharing a link resolve once), and cached at Cloudflare's edge for a
+  day across all visitors.
+- **Nothing until the map is on screen.** Resolution waits behind the same
+  IntersectionObserver as the iframe, so an off-screen map costs no request.
+- **A failed lookup isn't retried.** The container is marked before the request
+  goes out, so a re-scan — or the standalone build's MutationObserver, which
+  fires constantly — can't turn one broken link into a request loop. The failure
+  is logged once, with the Worker's own explanation attached.
+
+`g.co/…` and the older `goo.gl/maps/…` links go the same route.
 
 ### An id beats a point
 
@@ -103,6 +134,11 @@ control.
 | `data-map-prefer` | `coords` | `name` labels the pin with the place name (see above)          |
 | `data-map-lang`   | —        | Language code for the map UI, e.g. `fr`                        |
 | `data-map-lazy`   | `true`   | `false` builds the iframe immediately, without waiting         |
+| `data-map-resolver` | `RESOLVER` in the module | Short-link resolver endpoint, for pointing one map at a different Worker |
+
+`data-map-resolver` is a per-element escape hatch and shouldn't normally be set
+— the resolver is site-wide. `window.CPRT_MAP_RESOLVER`, set before the bundle
+runs, overrides it for a page without a rebuild.
 
 ## Behavior
 
@@ -120,6 +156,8 @@ control.
   does this automatically via a `MutationObserver`.
 - The URL parser is exported as `window.CPRT.mapEmbed.toEmbedSrc(url, config)`
   if you ever want to check what a given URL resolves to from the console.
+  `window.CPRT.mapEmbed.resolveShortLink(shortUrl)` does the same for the
+  resolver hop, returning a promise for the expanded URL.
 
 ## When the map doesn't appear
 
@@ -129,6 +167,8 @@ point at three different problems:
 | What you see | What it is |
 | ------------ | ---------- |
 | A `[map-embed]` warning naming your URL | The URL couldn't be parsed. The message says what to do — usually paste a Share → **Embed a map** URL instead, which always works. |
+| `…is a shortened link, and no resolver is configured` | The Worker isn't deployed or `RESOLVER` is empty. See [Short links](#short-links). |
+| `resolver returned 502…` / `resolver returned 403…` | The Worker is reachable but couldn't expand that link. 403 means `ALLOW_ORIGINS` doesn't list this domain; 502 means Google didn't hand back a maps URL. `worker/README.md` has both. |
 | No warning, and no `<iframe>` inside the container in the inspector | The bundle isn't loading on that page. Check the embed snippet — see the `webflow-deploy` skill. |
 | No warning, an `<iframe>` **is** there, but nothing is visible | The container has no height. This is the most common one: the iframe fills its container, so a zero-tall container is a zero-tall map. Give the div a height in the Designer, or set `--_map---ratio`. |
 

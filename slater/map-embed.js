@@ -14,6 +14,8 @@
   - Carries its own iframe styling inline, so it works with no stylesheet.
   - Silent on success; only unusable URLs are logged. To check it wired up:
     document.documentElement.hasAttribute('data-map-embed-on')
+  - Short links (maps.app.goo.gl) need the resolver Worker: set RESOLVER below,
+    or window.CPRT_MAP_RESOLVER before this runs. See worker/README.md.
 
   No Google Maps API key and no billing account: this builds URLs for the free
   `output=embed` endpoint, the same thing Google's "Share → Embed a map" panel
@@ -23,6 +25,20 @@
 ;(function () {
   var HOOK_SELECTOR = '[data-map="embed"], [data-map-url]'
   var EMBED_ORIGIN = 'https://maps.google.com/maps'
+
+  /*
+    The share sheet hands out maps.app.goo.gl links by default, but a short link
+    is only an id, and Google serves no CORS headers on that host — so the
+    browser can't follow the redirect to find out what it points at.
+    worker/map-resolve.js does that one hop server-side.
+
+    Paste the deployed Worker URL here (see worker/README.md), or set
+    window.CPRT_MAP_RESOLVER before this script runs. Left empty, short links
+    warn as they always have and every other URL shape is unaffected.
+  */
+  var RESOLVER = ''
+
+  var SHORTENER = /(^|\.)(goo\.gl|g\.co)$/i
 
   function extractIframeSrc(text) {
     var match = text.match(/<iframe[^>]*\ssrc=["']([^"']+)["']/i)
@@ -181,14 +197,17 @@
       return { src: embedSrc({ q: value, z: config.zoom }, config) }
     }
 
-    // Short links only resolve on a redirect the browser can't follow
-    // cross-origin, so there is nothing to parse.
-    if (/(^|\.)(goo\.gl|g\.co)$/i.test(url.hostname)) {
+    // A short link carries nothing to parse — it's an id that only resolves on
+    // a redirect the browser can't follow cross-origin. Hand it back for the
+    // resolver to expand; without one configured, say what to do by hand.
+    if (SHORTENER.test(url.hostname)) {
+      if (config.resolver) return { short: url.toString() }
       return {
         error:
-          '"' + raw + '" is a shortened link. Open it in a browser and copy ' +
-          'the full google.com/maps URL from the address bar, or use ' +
-          'Share → Embed a map.',
+          '"' + raw + '" is a shortened link, and no resolver is configured. ' +
+          'Open it in a browser and copy the full google.com/maps URL from the ' +
+          'address bar, use Share → Embed a map, or deploy the map-resolve ' +
+          'Worker and set RESOLVER at the top of this script.',
       }
     }
 
@@ -253,7 +272,81 @@
       prefer: el.getAttribute('data-map-prefer') || 'coords',
       lang: el.getAttribute('data-map-lang') || null,
       lazy: el.getAttribute('data-map-lazy') !== 'false',
+      resolver:
+        el.getAttribute('data-map-resolver') || window.CPRT_MAP_RESOLVER || RESOLVER,
     }
+  }
+
+  /*
+    Short link → long URL, over the resolver Worker.
+
+    Three layers of not-asking-twice, because a Collection List can easily hold
+    the same link several times over: `expanded` covers repeats on the page,
+    `inFlight` collapses simultaneous requests for one link into a single fetch,
+    and sessionStorage carries the answer across page navigations in the tab.
+  */
+  var CACHE_PREFIX = 'cprt:map:'
+  var expanded = {}
+  var inFlight = {}
+
+  function remember(short, full) {
+    expanded[short] = full
+    try {
+      sessionStorage.setItem(CACHE_PREFIX + short, full)
+    } catch (error) {
+      // Storage disabled or full. The in-memory copy still does the page.
+    }
+  }
+
+  function recall(short) {
+    if (expanded[short]) return expanded[short]
+    try {
+      return sessionStorage.getItem(CACHE_PREFIX + short)
+    } catch (error) {
+      return null
+    }
+  }
+
+  function resolveShortLink(short, resolver) {
+    var known = recall(short)
+    if (known) return Promise.resolve(known)
+    if (inFlight[short]) return inFlight[short]
+
+    var endpoint
+    try {
+      endpoint = new URL(resolver || RESOLVER)
+    } catch (error) {
+      return Promise.reject(new Error('"' + resolver + '" is not a valid resolver URL'))
+    }
+    endpoint.searchParams.set('u', short)
+
+    var request = fetch(endpoint.toString(), { credentials: 'omit' })
+      .then(function (response) {
+        // The Worker explains itself in the body on failure, which is far more
+        // use in the console than a bare status code.
+        return response.json().catch(function () {
+          return null
+        }).then(function (body) {
+          if (!response.ok) {
+            throw new Error(
+              'resolver returned ' + response.status + ' for "' + short + '"' +
+                (body && body.error ? ' — ' + body.error : '')
+            )
+          }
+          var full = body && typeof body.url === 'string' ? body.url : ''
+          if (!/^https?:\/\//i.test(full)) {
+            throw new Error('resolver returned no URL for "' + short + '"')
+          }
+          remember(short, full)
+          return full
+        })
+      })
+      .finally(function () {
+        delete inFlight[short]
+      })
+
+    inFlight[short] = request
+    return request
   }
 
   function readUrl(el) {
@@ -315,7 +408,12 @@
       console.warn('[map-embed]', result.error, el)
       return
     }
-    if (el.getAttribute('data-map-src') === result.src) return
+
+    // A re-scan shouldn't reload a map whose URL hasn't changed, and shouldn't
+    // send a short link back to the resolver. The MutationObserver below makes
+    // this the hot path, not an edge case.
+    if (result.src && el.getAttribute('data-map-src') === result.src) return
+    if (result.short && el.getAttribute('data-map-short') === result.short) return
 
     // The raw URL was sitting in the element as text; clear it so it can't
     // paint behind the map. Authored children are left alone.
@@ -329,17 +427,48 @@
         })
     }
 
+    function build() {
+      if (result.src) {
+        render(el, result.src, config)
+        return
+      }
+
+      // Marked before the request rather than after: the MutationObserver
+      // re-scans constantly, and a resolver that fails must not be retried on
+      // every DOM change for the rest of the page's life.
+      el.setAttribute('data-map-short', result.short)
+
+      resolveShortLink(result.short, config.resolver)
+        .then(function (full) {
+          var expandedResult = toEmbedSrc(full, config)
+          if (expandedResult.src) {
+            render(el, expandedResult.src, config)
+            return
+          }
+          console.warn(
+            '[map-embed]',
+            expandedResult.error ||
+              'resolver expanded "' + result.short + '" to something unusable',
+            el
+          )
+        })
+        .catch(function (failure) {
+          console.warn('[map-embed]', failure.message, el)
+        })
+    }
+
     if (!config.lazy || typeof IntersectionObserver === 'undefined') {
-      render(el, result.src, config)
+      build()
       return
     }
 
     // Maps are heavy: hold the request until the element is near the viewport.
+    // The resolver call waits with it, so an off-screen map costs nothing.
     var observer = new IntersectionObserver(
       function (entries) {
         if (!entries[0].isIntersecting) return
         observer.disconnect()
-        render(el, result.src, config)
+        build()
       },
       { rootMargin: '200px' }
     )
@@ -363,5 +492,9 @@
   observer.observe(document.documentElement, { childList: true, subtree: true })
 
   window.CPRT = window.CPRT || {}
-  window.CPRT.mapEmbed = { refresh: scan, toEmbedSrc: toEmbedSrc }
+  window.CPRT.mapEmbed = {
+    refresh: scan,
+    toEmbedSrc: toEmbedSrc,
+    resolveShortLink: resolveShortLink,
+  }
 })()

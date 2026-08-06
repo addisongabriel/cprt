@@ -46,6 +46,11 @@ immediately, taking its iframe styling from `main.css`, and skipping the
 Loading both on one page is harmless but pointless — each would skip the
 other's already-built maps.
 
+Both carry their own `RESOLVER` constant for expanding `maps.app.goo.gl` short
+links (see `worker/README.md`), and **the two are separate values** — deploying
+the Worker means pasting its URL into both files, or setting
+`window.CPRT_MAP_RESOLVER` on the page, which either build will pick up.
+
 ## Divergence warning
 
 `src/modules/nav-hover-image.js` is the bundled equivalent of

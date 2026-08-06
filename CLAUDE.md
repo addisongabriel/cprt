@@ -27,3 +27,6 @@ deploy-related.
   queries (fluid/container-query responsiveness), interactions via the
   CSS-only trigger & state system rather than JS wherever possible.
 - Run `npm run build` and commit the updated `dist/` with any src change.
+- `worker/` is a Cloudflare Worker, outside the Vite build and the jsDelivr
+  pipeline — it's deployed by hand (`worker/README.md`) and changes there need
+  no rebuild. Nothing in `src/` imports it.

@@ -53,7 +53,14 @@ src/
   styles/
     main.css      custom CSS beyond what Webflow's style panel can set
 dist/             built bundle served via jsDelivr (committed)
+slater/           standalone paste-in builds — not part of the bundle
+worker/           Cloudflare Worker: expands Google Maps short links
+docs/             per-module Webflow ↔ JS contracts
 ```
+
+`worker/` is the one thing here that jsDelivr doesn't serve — it's deployed
+separately, once, and only exists because expanding a `maps.app.goo.gl` link
+needs a hop the browser can't make. See `worker/README.md`.
 
 ## Conventions (Lumos)
 
