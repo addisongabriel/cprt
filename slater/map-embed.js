@@ -2,24 +2,39 @@
   Map Embed — standalone build.
 
   Paste into Slater's JS panel, or between <script> tags in a Webflow HTML
-  Embed (page-level, or inside the component itself). No imports, no build
-  step, no dependencies. This file is deliberately NOT part of the Vite bundle
-  (nothing in src/ imports it), so it can be copied verbatim.
+  Embed. No imports, no build step, no dependencies, nothing to deploy.
 
-  Same markup contract and behavior as src/modules/map-embed.js — see
-  docs/map-embed-webflow.md. The differences, per slater/README.md conventions:
+  Give any element a Google Maps URL and it becomes a map that fills that
+  element. Sizing is yours: set a height in the Designer (or an aspect ratio)
+  and the iframe fills it edge to edge.
 
-  - Runs immediately rather than waiting on DOMContentLoaded, and watches with
-    a MutationObserver for hooks that arrive later (CMS render, modal, tab).
-  - Carries its own iframe styling inline, so it works with no stylesheet.
-  - Silent on success; only unusable URLs are logged. To check it wired up:
-    document.documentElement.hasAttribute('data-map-embed-on')
-  - Short links (maps.app.goo.gl) need the resolver Worker: set RESOLVER below,
-    or window.CPRT_MAP_RESOLVER before this runs. See worker/README.md.
+    <div data-map-url="https://maps.app.goo.gl/VZTUE5yUNMm7Z49QA"
+         style="height: 24rem"></div>
+
+  Markup contract — one attribute is enough:
+    data-map-url="…"     the URL; bindable to a CMS field
+    data-map="embed"     alternative hook, when the URL comes from a child
+    data-map="url"       child whose text is the URL (easiest thing to bind
+                         inside a Collection List); hidden automatically
+
+  Config attributes (optional, on the hook element):
+    data-map-zoom        zoom level, overriding whatever the URL implies
+    data-map-title       iframe title, read by screen readers  (default "Map")
+    data-map-pin         "false" centers the map without a marker
+    data-map-prefer      "name" labels the pin with the place name instead of
+                         pinning its exact coordinates
+    data-map-lang        language code for the map UI, e.g. "fr"
+    data-map-lazy        "false" builds the iframe immediately instead of
+                         waiting until it's near the viewport
 
   No Google Maps API key and no billing account: this builds URLs for the free
   `output=embed` endpoint, the same thing Google's "Share → Embed a map" panel
-  produces.
+  produces, so nothing here ever hits a metered API.
+
+  Runs immediately rather than waiting on DOMContentLoaded, and watches with a
+  MutationObserver for hooks that arrive later (CMS render, modal, tab). Silent
+  on success; only unusable URLs are logged, under a [map-embed] prefix. To
+  check it wired up:  document.documentElement.hasAttribute('data-map-embed-on')
 */
 
 ;(function () {
@@ -27,19 +42,44 @@
   var EMBED_ORIGIN = 'https://maps.google.com/maps'
 
   /*
-    The share sheet hands out maps.app.goo.gl links by default, but a short link
-    is only an id, and Google serves no CORS headers on that host — so the
-    browser can't follow the redirect to find out what it points at.
-    worker/map-resolve.js does that one hop server-side.
+    Short links — maps.app.goo.gl — are what the Share sheet hands out by
+    default, so they're what a client is most likely to paste.
 
-    Paste the deployed Worker URL here (see worker/README.md), or set
-    window.CPRT_MAP_RESOLVER before this script runs. Left empty, short links
-    warn as they always have and every other URL shape is unaffected.
+    A short link is only an id: the destination appears when something follows
+    its redirect, and the browser can't. Google serves no CORS headers on that
+    host, so a fetch() from the page comes back opaque with the final URL
+    stripped. Something off the browser has to make that one hop.
+
+    First in the list is CPRT's own Cloudflare Worker (source in worker/), which
+    is the one to rely on: it's ours, it caches at the edge, and it only ever
+    follows Google's own shorteners. The rest are public CORS proxies — free
+    services nobody here controls, kept as a safety net for if the Worker is
+    ever down or torn down. They can rate-limit, slow down, or vanish, so if
+    short links start failing everywhere, check the Worker first.
+
+    Each is tried in order until one answers. Anything that takes a URL and
+    returns either the resolved URL as JSON {"url": "…"} or the destination
+    page's HTML will work — {url} is replaced with the encoded short link.
   */
-  var RESOLVER = 'https://cprt-map-resolve.gabe-f64.workers.dev'
+  var RESOLVERS = [
+    'https://cprt-map-resolve.gabe-f64.workers.dev/?u={url}',
+    'https://api.allorigins.win/get?url={url}',
+    'https://api.codetabs.com/v1/proxy?quest={url}',
+    'https://corsproxy.io/?url={url}',
+  ]
+
+  var RESOLVER_TIMEOUT = 8000
 
   var SHORTENER = /(^|\.)(goo\.gl|g\.co)$/i
+  var GOOGLE_HOST = /(^|\.)google(\.[a-z]{2,3})(\.[a-z]{2})?$/i
 
+  function warn() {
+    var args = ['[map-embed]'].concat(Array.prototype.slice.call(arguments))
+    console.warn.apply(console, args)
+  }
+
+  // Webflow authors paste whichever bit of the Share panel they landed on, so
+  // accept a whole <iframe> snippet as readily as a bare URL.
   function extractIframeSrc(text) {
     var match = text.match(/<iframe[^>]*\ssrc=["']([^"']+)["']/i)
     return match ? match[1].replace(/&amp;/g, '&') : null
@@ -173,7 +213,13 @@
     return url.toString()
   }
 
+  /*
+    Resolves whatever the author pasted into an embeddable src.
+    Returns { src }, { short } (needs a resolver round-trip first), or { error }
+    — never throws on junk input.
+  */
   function toEmbedSrc(input, config) {
+    config = config || {}
     var raw = String(input == null ? '' : input).trim()
     if (!raw) return { error: 'no URL given' }
 
@@ -197,19 +243,8 @@
       return { src: embedSrc({ q: value, z: config.zoom }, config) }
     }
 
-    // A short link carries nothing to parse — it's an id that only resolves on
-    // a redirect the browser can't follow cross-origin. Hand it back for the
-    // resolver to expand; without one configured, say what to do by hand.
-    if (SHORTENER.test(url.hostname)) {
-      if (config.resolver) return { short: url.toString() }
-      return {
-        error:
-          '"' + raw + '" is a shortened link, and no resolver is configured. ' +
-          'Open it in a browser and copy the full google.com/maps URL from the ' +
-          'address bar, use Share → Embed a map, or deploy the map-resolve ' +
-          'Worker and set RESOLVER at the top of this script.',
-      }
-    }
+    // Nothing to parse in a short link — hand it back to be expanded first.
+    if (SHORTENER.test(url.hostname)) return { short: url.toString() }
 
     // The URL's own language, unless the Designer asked for a specific one.
     var settings = Object.assign({}, config, {
@@ -264,28 +299,125 @@
     }
   }
 
-  function readConfig(el) {
-    return {
-      zoom: el.getAttribute('data-map-zoom') || null,
-      title: el.getAttribute('data-map-title') || 'Map',
-      pin: el.getAttribute('data-map-pin') !== 'false',
-      prefer: el.getAttribute('data-map-prefer') || 'coords',
-      lang: el.getAttribute('data-map-lang') || null,
-      lazy: el.getAttribute('data-map-lazy') !== 'false',
-      resolver:
-        el.getAttribute('data-map-resolver') || window.CPRT_MAP_RESOLVER || RESOLVER,
+  /* ---------- expanding short links ---------- */
+
+  /*
+    Is this string the real destination? A redirect chain can land on things
+    that sit on a Google domain without being a map — most often the EU consent
+    wall, which carries the actual destination in `continue=`.
+  */
+  function mapsUrl(value) {
+    if (!value || typeof value !== 'string') return null
+
+    var url
+    try {
+      url = new URL(value)
+    } catch (error) {
+      return null
     }
+    if (!GOOGLE_HOST.test(url.hostname)) return null
+
+    if (/^consent\./i.test(url.hostname)) {
+      return mapsUrl(url.searchParams.get('continue'))
+    }
+
+    var isMapsPath = /^\/maps(\/|$)/.test(url.pathname)
+    // maps.google.com/?cid=… has no /maps path but is still a place. `q` and
+    // `ll` only count on a maps.* host — google.com/search?q=… carries a `q`
+    // too, and treating that as a destination would embed the wrong thing.
+    var hasId = url.searchParams.has('cid') || url.searchParams.has('ftid')
+    var hasPoint =
+      /^maps\./i.test(url.hostname) &&
+      (url.searchParams.has('q') || url.searchParams.has('ll'))
+
+    return isMapsPath || hasId || hasPoint ? url.toString() : null
+  }
+
+  // Google escapes URLs two different ways depending on whether they sit in an
+  // attribute or a script literal. Unescape the whole document before matching,
+  // or a pattern stops dead at the first escape and yields a truncated URL.
+  function unescape(text) {
+    return text
+      .replace(/&amp;/g, '&')
+      .replace(/\\u003d/gi, '=')
+      .replace(/\\u0026/gi, '&')
+      .replace(/\\\//g, '/')
+  }
+
+  // Pull the destination out of whatever page came back — the short link's own
+  // redirect interstitial, or the Google Maps page it lands on.
+  function scrape(html) {
+    var text = unescape(html)
+    var patterns = [
+      /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,
+      /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"';]+)["']/i,
+      /https:\/\/(?:[\w-]+\.)*google\.[a-z.]{2,6}\/maps\/[^\s"'<>]+/i,
+      /https:\/\/maps\.google\.[a-z.]{2,6}\/\?(?:cid|ftid)=[^\s"'<>]+/i,
+    ]
+
+    for (var i = 0; i < patterns.length; i++) {
+      var match = text.match(patterns[i])
+      if (!match) continue
+      var found = mapsUrl(match[1] || match[0])
+      if (found) return found
+    }
+    return null
+  }
+
+  // A resolver may hand back the URL as JSON or hand back the page itself.
+  // Accept either, so any proxy shape works without special-casing it.
+  function readDestination(body) {
+    var text = body
+
+    if (/^\s*[{[]/.test(body)) {
+      try {
+        var data = JSON.parse(body)
+        var direct = mapsUrl(data.url) || (data.status && mapsUrl(data.status.url))
+        if (direct) return direct
+        if (typeof data.contents === 'string') text = data.contents
+      } catch (error) {
+        // Not JSON after all; fall through and treat it as markup.
+      }
+    }
+
+    return scrape(text)
+  }
+
+  function fetchVia(template, short) {
+    var endpoint = template.replace('{url}', encodeURIComponent(short))
+
+    var controller =
+      typeof AbortController !== 'undefined' ? new AbortController() : null
+    // A free proxy that has gone slow shouldn't hold the map hostage — give up
+    // and let the next one try.
+    var timer = controller
+      ? setTimeout(function () {
+          controller.abort()
+        }, RESOLVER_TIMEOUT)
+      : null
+
+    return fetch(endpoint, {
+      credentials: 'omit',
+      signal: controller ? controller.signal : undefined,
+    })
+      .then(function (response) {
+        if (!response.ok) throw new Error('status ' + response.status)
+        return response.text()
+      })
+      .then(readDestination)
+      .finally(function () {
+        if (timer) clearTimeout(timer)
+      })
   }
 
   /*
-    Short link → long URL, over the resolver Worker.
-
     Three layers of not-asking-twice, because a Collection List can easily hold
     the same link several times over: `expanded` covers repeats on the page,
-    `inFlight` collapses simultaneous requests for one link into a single fetch,
-    and sessionStorage carries the answer across page navigations in the tab.
+    `inFlight` collapses simultaneous requests for one link into a single
+    lookup, and sessionStorage carries the answer across page navigations.
   */
-  var CACHE_PREFIX = 'cprt:map:'
+  var CACHE_PREFIX = 'map-embed:'
   var expanded = {}
   var inFlight = {}
 
@@ -307,39 +439,36 @@
     }
   }
 
-  function resolveShortLink(short, resolver) {
+  function resolveShortLink(short) {
     var known = recall(short)
     if (known) return Promise.resolve(known)
     if (inFlight[short]) return inFlight[short]
 
-    var endpoint
-    try {
-      endpoint = new URL(resolver || RESOLVER)
-    } catch (error) {
-      return Promise.reject(new Error('"' + resolver + '" is not a valid resolver URL'))
-    }
-    endpoint.searchParams.set('u', short)
-
-    var request = fetch(endpoint.toString(), { credentials: 'omit' })
-      .then(function (response) {
-        // The Worker explains itself in the body on failure, which is far more
-        // use in the console than a bare status code.
-        return response.json().catch(function () {
+    // Walk the list until one answers. A resolver that errors, times out, or
+    // returns something unreadable is the same as one that isn't there.
+    function attempt(index) {
+      if (index >= RESOLVERS.length) {
+        return Promise.reject(
+          new Error(
+            'couldn\'t expand "' + short + '" — all ' + RESOLVERS.length +
+              ' resolvers failed. Paste the full google.com/maps URL instead, ' +
+              'or use Share → Embed a map.'
+          )
+        )
+      }
+      return fetchVia(RESOLVERS[index], short)
+        .catch(function () {
           return null
-        }).then(function (body) {
-          if (!response.ok) {
-            throw new Error(
-              'resolver returned ' + response.status + ' for "' + short + '"' +
-                (body && body.error ? ' — ' + body.error : '')
-            )
-          }
-          var full = body && typeof body.url === 'string' ? body.url : ''
-          if (!/^https?:\/\//i.test(full)) {
-            throw new Error('resolver returned no URL for "' + short + '"')
-          }
-          remember(short, full)
-          return full
         })
+        .then(function (full) {
+          return full || attempt(index + 1)
+        })
+    }
+
+    var request = attempt(0)
+      .then(function (full) {
+        remember(short, full)
+        return full
       })
       .finally(function () {
         delete inFlight[short]
@@ -347,6 +476,19 @@
 
     inFlight[short] = request
     return request
+  }
+
+  /* ---------- wiring ---------- */
+
+  function readConfig(el) {
+    return {
+      zoom: el.getAttribute('data-map-zoom') || null,
+      title: el.getAttribute('data-map-title') || 'Map',
+      pin: el.getAttribute('data-map-pin') !== 'false',
+      prefer: el.getAttribute('data-map-prefer') || 'coords',
+      lang: el.getAttribute('data-map-lang') || null,
+      lazy: el.getAttribute('data-map-lazy') !== 'false',
+    }
   }
 
   function readUrl(el) {
@@ -373,7 +515,7 @@
   }
 
   function render(el, src, config) {
-    // The wrap is the sizing container; only claim it if the site hasn't
+    // The hook is the sizing container; only claim it if the site hasn't
     // already positioned it.
     if (getComputedStyle(el).position === 'static') el.style.position = 'relative'
 
@@ -405,13 +547,13 @@
     var config = readConfig(el)
     var result = toEmbedSrc(found.value, config)
     if (result.error) {
-      console.warn('[map-embed]', result.error, el)
+      warn(result.error, el)
       return
     }
 
     // A re-scan shouldn't reload a map whose URL hasn't changed, and shouldn't
-    // send a short link back to the resolver. The MutationObserver below makes
-    // this the hot path, not an edge case.
+    // send a short link off to be expanded again. The MutationObserver below
+    // makes this the hot path, not an edge case.
     if (result.src && el.getAttribute('data-map-src') === result.src) return
     if (result.short && el.getAttribute('data-map-short') === result.short) return
 
@@ -433,27 +575,26 @@
         return
       }
 
-      // Marked before the request rather than after: the MutationObserver
+      // Marked before the lookup rather than after: the MutationObserver
       // re-scans constantly, and a resolver that fails must not be retried on
       // every DOM change for the rest of the page's life.
       el.setAttribute('data-map-short', result.short)
 
-      resolveShortLink(result.short, config.resolver)
+      resolveShortLink(result.short)
         .then(function (full) {
           var expandedResult = toEmbedSrc(full, config)
           if (expandedResult.src) {
             render(el, expandedResult.src, config)
             return
           }
-          console.warn(
-            '[map-embed]',
+          warn(
             expandedResult.error ||
-              'resolver expanded "' + result.short + '" to something unusable',
+              'expanded "' + result.short + '" to something unusable',
             el
           )
         })
         .catch(function (failure) {
-          console.warn('[map-embed]', failure.message, el)
+          warn(failure.message, el)
         })
     }
 
@@ -462,7 +603,7 @@
       return
     }
 
-    // Maps are heavy: hold the request until the element is near the viewport.
+    // Maps are heavy: hold everything until the element is near the viewport.
     // The resolver call waits with it, so an off-screen map costs nothing.
     var observer = new IntersectionObserver(
       function (entries) {

@@ -71,11 +71,27 @@ module calls it, gets the long URL back, and parses that exactly as if the
 author had pasted it. Everything downstream (`data-map-zoom`, `data-map-prefer`,
 the pin rules below) behaves identically.
 
-**Setup is one deploy, once.** See [`worker/README.md`](../worker/README.md):
-deploy it, paste the URL into `RESOLVER` at the top of
-`src/modules/map-embed.js`, rebuild. Until that's done, `RESOLVER` is empty and
-short links log the old "open it and copy the full URL" warning — which is also
-the honest fallback if the Worker ever goes away. Nothing else regresses.
+**Already wired up.** The Worker is deployed at
+`https://cprt-map-resolve.gabe-f64.workers.dev` and both builds point at it —
+`RESOLVER` in `src/modules/map-embed.js`, and first in the `RESOLVERS` list in
+`slater/map-embed.js`. Source and redeploy instructions:
+[`worker/README.md`](../worker/README.md).
+
+The two builds differ in what happens when the Worker doesn't answer:
+
+| | Falls back to |
+| --- | --- |
+| `slater/map-embed.js` (standalone) | three public CORS proxies, tried in order |
+| `src/modules/map-embed.js` (bundle) | nothing — logs a warning |
+
+The standalone build's extra fallbacks are free services nobody here controls,
+so they can rate-limit, slow down, or vanish. They exist so a paste-in copy of
+that file still works somewhere the Worker isn't reachable, not as something to
+depend on. If short links fail everywhere at once, check the Worker first.
+
+Adding fallbacks to the bundle means turning `RESOLVER` into a list the same
+way; it wasn't done there because the bundle is ours and the Worker is the
+supported path.
 
 What this costs at runtime, once wired:
 
