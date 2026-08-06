@@ -23,6 +23,7 @@
     data-map-lang      language code for the map UI, e.g. "fr"
     data-map-lazy      "false" builds the iframe immediately instead of
                        waiting until it's near the viewport
+    data-map-resolver  short-link resolver endpoint, overriding RESOLVER below
 
   The iframe is absolutely positioned to fill the hook element, so the map's
   size is entirely Designer-owned: give the element a height, or an aspect
@@ -31,6 +32,20 @@
 
 const HOOK_SELECTOR = '[data-map="embed"], [data-map-url]'
 const EMBED_ORIGIN = 'https://maps.google.com/maps'
+
+/*
+  The share sheet hands out maps.app.goo.gl links by default, so that's what an
+  author is holding — but a short link is only an id, and Google serves no CORS
+  headers on that host, so the browser can't follow the redirect to find out
+  what it points at. worker/map-resolve.js does that one hop server-side.
+
+  Paste the deployed Worker URL here (see worker/README.md). Left empty, short
+  links warn exactly as they did before and every other URL shape is unaffected
+  — the resolver is an upgrade, not a dependency.
+*/
+const RESOLVER = ''
+
+const SHORTENER = /(^|\.)(goo\.gl|g\.co)$/i
 
 const warn = (...args) => console.warn('[map-embed]', ...args)
 
@@ -169,7 +184,8 @@ function embedSrc(params, config) {
 
 /*
   Resolves whatever the author pasted into an embeddable src.
-  Returns { src } or { error } — never throws on junk input.
+  Returns { src }, { short } (needs a resolver round-trip first), or { error }
+  — never throws on junk input.
 */
 export function toEmbedSrc(input, config = {}) {
   const raw = String(input ?? '').trim()
@@ -195,13 +211,17 @@ export function toEmbedSrc(input, config = {}) {
     return { src: embedSrc({ q: value, z: config.zoom }, config) }
   }
 
-  // Short links only resolve on a redirect, which the browser can't follow
-  // cross-origin, so there is nothing to parse.
-  if (/(^|\.)(goo\.gl|g\.co)$/i.test(url.hostname)) {
+  // A short link carries nothing to parse — it's an id that only resolves on a
+  // redirect the browser can't follow cross-origin. Hand it back for the
+  // resolver to expand; without one configured, say what to do by hand.
+  if (SHORTENER.test(url.hostname)) {
+    if (config.resolver) return { short: url.toString() }
     return {
       error:
-        `"${raw}" is a shortened link. Open it in a browser and copy the full ` +
-        'google.com/maps URL from the address bar, or use Share → Embed a map.',
+        `"${raw}" is a shortened link, and no resolver is configured. Open it ` +
+        'in a browser and copy the full google.com/maps URL from the address ' +
+        'bar, use Share → Embed a map, or deploy worker/map-resolve.js and set ' +
+        'RESOLVER in map-embed.js to make these work as pasted.',
     }
   }
 
@@ -267,7 +287,75 @@ function readConfig(el) {
     prefer: attr('data-map-prefer') || 'coords',
     lang: attr('data-map-lang') || null,
     lazy: attr('data-map-lazy') !== 'false',
+    resolver: attr('data-map-resolver') || window.CPRT_MAP_RESOLVER || RESOLVER,
   }
+}
+
+/*
+  Short link → long URL, over the resolver Worker.
+
+  Three layers of not-asking-twice, because a Collection List can easily hold
+  the same link several times over: `expanded` covers repeats on the page,
+  `inFlight` collapses simultaneous requests for one link into a single fetch,
+  and sessionStorage carries the answer across page navigations in the tab.
+*/
+const expanded = new Map()
+const inFlight = new Map()
+const CACHE_PREFIX = 'cprt:map:'
+
+function remember(short, full) {
+  expanded.set(short, full)
+  try {
+    sessionStorage.setItem(CACHE_PREFIX + short, full)
+  } catch {
+    // Storage disabled or full. The in-memory copy still does the page.
+  }
+}
+
+function recall(short) {
+  if (expanded.has(short)) return expanded.get(short)
+  try {
+    return sessionStorage.getItem(CACHE_PREFIX + short)
+  } catch {
+    return null
+  }
+}
+
+export function resolveShortLink(short, resolver = RESOLVER) {
+  const known = recall(short)
+  if (known) return Promise.resolve(known)
+  if (inFlight.has(short)) return inFlight.get(short)
+
+  let endpoint
+  try {
+    endpoint = new URL(resolver)
+  } catch {
+    return Promise.reject(new Error(`"${resolver}" is not a valid resolver URL`))
+  }
+  endpoint.searchParams.set('u', short)
+
+  const request = fetch(endpoint.toString(), { credentials: 'omit' })
+    .then(async (response) => {
+      // The Worker explains itself in the body on failure, which is far more
+      // use in the console than a bare status code.
+      const body = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(
+          `resolver returned ${response.status} for "${short}"` +
+            (body?.error ? ` — ${body.error}` : '')
+        )
+      }
+      const full = typeof body?.url === 'string' ? body.url : ''
+      if (!/^https?:\/\//i.test(full)) {
+        throw new Error(`resolver returned no URL for "${short}"`)
+      }
+      remember(short, full)
+      return full
+    })
+    .finally(() => inFlight.delete(short))
+
+  inFlight.set(short, request)
+  return request
 }
 
 function readUrl(el) {
@@ -314,12 +402,16 @@ function initInstance(el) {
   }
 
   const config = readConfig(el)
-  const { src, error } = toEmbedSrc(value, config)
+  const { src, short, error } = toEmbedSrc(value, config)
   if (error) {
     warn(error, el)
     return
   }
-  if (el.getAttribute('data-map-src') === src) return
+
+  // A re-scan shouldn't reload a map whose URL hasn't changed, and shouldn't
+  // send a short link back to the resolver.
+  if (src && el.getAttribute('data-map-src') === src) return
+  if (short && el.getAttribute('data-map-short') === short) return
 
   // The raw URL was sitting in the element as text; clear it so it can't paint
   // behind the map. Authored children (overlays, captions) are left alone.
@@ -329,19 +421,43 @@ function initInstance(el) {
       .forEach((node) => node.remove())
   }
 
+  const build = () => {
+    if (src) {
+      render(el, src, config)
+      return
+    }
+
+    // Marked before the request rather than after: a re-scan can land while
+    // this is still in the air, and a resolver that fails must not be retried
+    // on every DOM mutation for the rest of the page's life.
+    el.setAttribute('data-map-short', short)
+
+    resolveShortLink(short, config.resolver)
+      .then((full) => {
+        const result = toEmbedSrc(full, config)
+        if (result.src) {
+          render(el, result.src, config)
+          return
+        }
+        warn(result.error || `resolver expanded "${short}" to something unusable`, el)
+      })
+      .catch((failure) => warn(failure.message, el))
+  }
+
   if (!config.lazy || typeof IntersectionObserver === 'undefined') {
-    render(el, src, config)
+    build()
     return
   }
 
   // Maps are heavy: hold the request until the element is close to the
   // viewport. `loading="lazy"` alone doesn't help maps below the fold in every
-  // browser, and this also covers a map inside a hidden tab or dropdown.
+  // browser, and this also covers a map inside a hidden tab or dropdown. The
+  // resolver call waits with it, so an off-screen map costs nothing at all.
   const observer = new IntersectionObserver(
     ([entry]) => {
       if (!entry.isIntersecting) return
       observer.disconnect()
-      render(el, src, config)
+      build()
     },
     { rootMargin: '200px' }
   )
@@ -360,5 +476,5 @@ export function init() {
   maps.forEach(initInstance)
 
   window.CPRT = window.CPRT || {}
-  window.CPRT.mapEmbed = { refresh, toEmbedSrc }
+  window.CPRT.mapEmbed = { refresh, toEmbedSrc, resolveShortLink }
 }
