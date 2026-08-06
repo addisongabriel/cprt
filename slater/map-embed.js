@@ -36,7 +36,7 @@
     window.CPRT_MAP_RESOLVER before this script runs. Left empty, short links
     warn as they always have and every other URL shape is unaffected.
   */
-  var RESOLVER = ''
+  var RESOLVER = 'https://cprt-map-resolve.gabe-f64.workers.dev'
 
   var SHORTENER = /(^|\.)(goo\.gl|g\.co)$/i
 
