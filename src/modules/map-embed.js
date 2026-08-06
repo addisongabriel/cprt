@@ -43,7 +43,7 @@ const EMBED_ORIGIN = 'https://maps.google.com/maps'
   links warn exactly as they did before and every other URL shape is unaffected
   — the resolver is an upgrade, not a dependency.
 */
-const RESOLVER = ''
+const RESOLVER = 'https://cprt-map-resolve.gabe-f64.workers.dev'
 
 const SHORTENER = /(^|\.)(goo\.gl|g\.co)$/i
 
