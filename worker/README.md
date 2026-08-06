@@ -51,6 +51,31 @@ curl "https://cprt-map-resolve.<your-subdomain>.workers.dev/?u=https%3A%2F%2Fmap
 An `x-cache: hit` response header on the second call means the edge cache is
 doing its job.
 
+## When it stops resolving
+
+Add `&debug=1` to any request. It replays the lookup, skips the cache, and
+returns the whole redirect chain instead of the answer:
+
+```bash
+curl "https://cprt-map-resolve.gabe-f64.workers.dev/?u=https%3A%2F%2Fmaps.app.goo.gl%2FVZTUE5yUNMm7Z49QA&debug=1"
+```
+
+```json
+{
+  "url": null,
+  "why": "Google served a bot check (/sorry/) instead of the redirect",
+  "hops": [
+    { "url": "https://maps.app.goo.gl/…", "status": 302, "location": "…", "resolvedTo": "…" },
+    { "url": "…", "status": 200, "bodyLength": 4211, "bodySnippet": "…" }
+  ]
+}
+```
+
+`why` is also folded into the normal 502 body, so the browser console says what
+went wrong rather than just that something did. Google serves datacenter IPs
+differently from browsers — a bot check or a consent wall where a browser gets
+a plain 302 — and this is the only way to see which.
+
 ## Contract
 
 `GET /?u=<url-encoded short link>`

@@ -138,7 +138,7 @@ function scrape(html) {
   return null
 }
 
-async function resolve(target) {
+async function resolve(target, trace) {
   let current = target
 
   for (let hop = 0; hop < MAX_HOPS; hop += 1) {
@@ -152,8 +152,17 @@ async function resolve(target) {
     })
 
     const location = response.headers.get('location')
+    const hop = {
+      url: current,
+      status: response.status,
+      location: location,
+      contentType: response.headers.get('content-type'),
+    }
+
     if (location) {
       current = new URL(location, current).toString()
+      hop.resolvedTo = current
+      if (trace) trace.push(hop)
       // Stop the moment the chain is map-shaped — fetching the map page itself
       // would download a megabyte of HTML for nothing.
       const found = mapsUrl(current)
@@ -162,12 +171,48 @@ async function resolve(target) {
     }
 
     const found = mapsUrl(current)
-    if (found) return found
+    if (found) {
+      if (trace) trace.push(hop)
+      return found
+    }
 
-    return scrape(await response.text())
+    // No redirect and not there yet: an interstitial, a consent wall, or a bot
+    // check. Whichever it is, the body is the only thing left to go on.
+    const body = await response.text()
+    if (trace) {
+      hop.bodyLength = body.length
+      hop.bodySnippet = body.slice(0, 2000)
+      trace.push(hop)
+    }
+    return scrape(body)
   }
 
   return null
+}
+
+/*
+  Why the chain ended where it did, in words worth putting in an error message.
+  Google serves datacenter IPs differently from browsers, and "didn't resolve"
+  is useless when the real answer is "we got a captcha".
+*/
+function diagnose(trace) {
+  const last = trace[trace.length - 1]
+  if (!last) return 'no response at all'
+
+  const where = last.resolvedTo || last.url
+  if (/\/sorry\//.test(where) || /\bCaptcha\b/i.test(last.bodySnippet || '')) {
+    return 'Google served a bot check (/sorry/) instead of the redirect'
+  }
+  if (/^https:\/\/consent\./i.test(where)) {
+    return 'Google served a consent wall with no usable continue= target'
+  }
+  if (last.status >= 400) {
+    return `the last hop answered ${last.status}`
+  }
+  if (!last.location) {
+    return `the last hop was a ${last.bodyLength}-byte page with no maps URL in it`
+  }
+  return `the chain ended at ${where}, which isn't a maps URL`
 }
 
 export default {
@@ -206,6 +251,12 @@ export default {
       )
     }
 
+    // ?debug=1 replays the lookup and reports the whole redirect chain instead
+    // of the answer. Google serves datacenter IPs differently from browsers, so
+    // when this stops working this is the only way to see what it actually
+    // sent. Skips the cache, since a cached answer explains nothing.
+    const debug = new URL(request.url).searchParams.get('debug')
+
     // Key the cache on the normalized short URL, not the incoming request, so
     // every site and every visitor shares one lookup per link.
     const cache = caches.default
@@ -213,22 +264,36 @@ export default {
       `https://map-resolve.invalid/?u=${encodeURIComponent(short.toString())}`
     )
 
-    const cached = await cache.match(cacheKey)
-    if (cached) {
-      const body = await cached.json()
-      return json(body, 200, { ...cors, 'x-cache': 'hit' })
+    if (!debug) {
+      const cached = await cache.match(cacheKey)
+      if (cached) {
+        const body = await cached.json()
+        return json(body, 200, { ...cors, 'x-cache': 'hit' })
+      }
     }
 
+    const trace = []
     let resolved
     try {
-      resolved = await resolve(short.toString())
+      resolved = await resolve(short.toString(), trace)
     } catch (error) {
+      if (debug) {
+        return json({ url: null, threw: error.message, hops: trace }, 200, cors)
+      }
       return json({ error: `couldn't reach ${short.hostname}: ${error.message}` }, 502, cors)
+    }
+
+    if (debug) {
+      return json(
+        { url: resolved, why: resolved ? 'resolved' : diagnose(trace), hops: trace },
+        200,
+        cors
+      )
     }
 
     if (!resolved) {
       return json(
-        { error: `"${short}" didn't resolve to a Google Maps URL` },
+        { error: `"${short}" didn't resolve — ${diagnose(trace)}. Add &debug=1 to this URL to see the full redirect chain.` },
         502,
         cors
       )
